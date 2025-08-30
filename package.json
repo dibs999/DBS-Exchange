@@ -1,0 +1,13 @@
+{
+  "name": "dbs-exchange",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "echo 'No tests'"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "wagmi": "^1.4.5",
+    "viem": "^1.0.0"
+  }
+}
