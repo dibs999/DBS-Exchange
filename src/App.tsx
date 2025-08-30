@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { WagmiConfig } from 'wagmi';
 import { wagmiConfig } from './config';
+import Swap from './Swap';
 
 // The full application UI will be built on top of the local simulation and
 // on-chain utilities exported from other modules. For now this file hosts a
@@ -35,8 +36,9 @@ export function AppBody() {
           <option value="en">English</option>
         </select>
       </header>
-      <main className="p-4">
+      <main className="p-4 space-y-4">
         <p>{t.welcome}</p>
+        <Swap />
       </main>
     </div>
   );
