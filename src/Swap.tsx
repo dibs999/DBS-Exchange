@@ -24,6 +24,10 @@ export default function Swap() {
   async function getQuote() {
     try {
       if (!amountIn) return;
+      if (!addr || !publicClient) {
+        setStatus('Unsupported network');
+        return;
+      }
       const amt = parseUnits(amountIn, 18); // assume WETH input
       const q = await publicClient.readContract({
         address: addr.QUOTER_V2,
@@ -32,6 +36,7 @@ export default function Swap() {
         args: [addr.WETH, addr.USDC, FEE_TIER, amt, 0n],
       });
       setQuote(formatUnits(q as bigint, 6));
+      setStatus(null);
     } catch (err: any) {
       setQuote(null);
       setStatus(err.message || String(err));
@@ -41,6 +46,10 @@ export default function Swap() {
   async function doSwap() {
     if (!walletClient) {
       setStatus('Wallet not connected');
+      return;
+    }
+    if (!addr || !publicClient) {
+      setStatus('Unsupported network');
       return;
     }
     try {
@@ -79,30 +88,46 @@ export default function Swap() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
+    <div className="swap-card">
+      <div className="swap-header">
+        <h4>Quick Swap</h4>
         {isConnected ? (
-          <button onClick={() => disconnect()} className="px-3 py-1 bg-neutral-800 rounded">Disconnect {address?.slice(0,6)}...</button>
+          <button className="link-btn" onClick={() => disconnect()}>
+            Disconnect {address?.slice(0, 6)}...
+          </button>
         ) : (
-          <button onClick={handleConnect} className="px-3 py-1 bg-neutral-800 rounded">Connect Wallet</button>
+          <button className="link-btn" onClick={handleConnect}>
+            Connect wallet
+          </button>
         )}
       </div>
-      <div className="space-y-2">
+      <label className="swap-label" htmlFor="swap-amount">
+        Amount in WETH
+      </label>
+      <div className="swap-input-row">
         <input
+          id="swap-amount"
           type="text"
-          placeholder="Amount in WETH"
+          placeholder="0.00"
           value={amountIn}
           onChange={(e) => setAmountIn(e.target.value)}
-          className="w-full p-2 bg-neutral-900 rounded"
+          className="swap-input"
         />
-        <button onClick={getQuote} className="px-3 py-1 bg-neutral-700 rounded">Get Quote</button>
-        {quote && <div>Estimated USDC out: {quote}</div>}
+        <button type="button" className="ghost-btn swap-quote-btn" onClick={getQuote}>
+          Get quote
+        </button>
       </div>
+      {quote && <div className="swap-quote">Estimated USDC out: {quote}</div>}
       {isConnected && (
-        <button onClick={doSwap} className="px-3 py-1 bg-indigo-600 rounded">Swap</button>
+        <button type="button" className="swap-primary" onClick={doSwap}>
+          Swap now
+        </button>
       )}
-      {status && <div className="text-sm text-red-400">{status}</div>}
+      {status && (
+        <div className={`swap-status ${status.startsWith('Swap submitted') ? 'text-positive' : 'swap-status--error'}`}>
+          {status}
+        </div>
+      )}
     </div>
   );
 }
-
