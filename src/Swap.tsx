@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAccount, useConnect, useDisconnect, useChainId, usePublicClient, useWalletClient } from 'wagmi';
 import { injected } from 'wagmi/connectors';
 import { parseUnits, formatUnits } from 'viem';
@@ -7,7 +7,25 @@ import { QUOTER_V2_ABI, SWAP_ROUTER_02_ABI } from './abis';
 
 const FEE_TIER = 3000n; // 0.3%
 
-export default function Swap() {
+export type PriceFeed = Record<string, { usd: number; change24h?: number }>;
+
+type SwapPreset = {
+  label: string;
+  amount: string;
+};
+
+const PRESETS: SwapPreset[] = [
+  { label: '0.1', amount: '0.1' },
+  { label: '0.25', amount: '0.25' },
+  { label: '0.5', amount: '0.5' },
+  { label: '1', amount: '1' },
+];
+
+type SwapProps = {
+  prices: PriceFeed;
+};
+
+export default function Swap({ prices }: SwapProps) {
   const { address, isConnected } = useAccount();
   const { connectAsync } = useConnect({ connector: injected() });
   const { disconnect } = useDisconnect();
@@ -18,12 +36,27 @@ export default function Swap() {
   const [amountIn, setAmountIn] = useState('');
   const [quote, setQuote] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [manualRate, setManualRate] = useState<string>('');
+  const [usingSimulation, setUsingSimulation] = useState<boolean>(false);
 
   const addr = ADDR[chainId];
+
+  const derivedRate = useMemo(() => {
+    const eth = prices['ethereum'];
+    const usdc = prices['usd-coin'];
+    if (!eth || !usdc) return undefined;
+    return eth.usd / usdc.usd;
+  }, [prices]);
+
+  useEffect(() => {
+    if (manualRate) return;
+    if (derivedRate) setManualRate(derivedRate.toFixed(4));
+  }, [derivedRate, manualRate]);
 
   async function getQuote() {
     try {
       if (!amountIn) return;
+      if (!addr) throw new Error('Unsupported network');
       const amt = parseUnits(amountIn, 18); // assume WETH input
       const q = await publicClient.readContract({
         address: addr.QUOTER_V2,
@@ -31,16 +64,30 @@ export default function Swap() {
         functionName: 'quoteExactInputSingle',
         args: [addr.WETH, addr.USDC, FEE_TIER, amt, 0n],
       });
+      setUsingSimulation(false);
       setQuote(formatUnits(q as bigint, 6));
     } catch (err: any) {
-      setQuote(null);
-      setStatus(err.message || String(err));
+      // When RPC access is blocked or fails, fall back to simulated pricing.
+      const rate = manualRate ? Number(manualRate) : derivedRate;
+      if (!rate) {
+        setQuote(null);
+        setStatus(err?.message || String(err));
+        return;
+      }
+      const simulated = (Number(amountIn || '0') * rate).toFixed(6);
+      setQuote(simulated);
+      setUsingSimulation(true);
+      setStatus('Live quote unavailable. Using price feed instead.');
     }
   }
 
   async function doSwap() {
     if (!walletClient) {
       setStatus('Wallet not connected');
+      return;
+    }
+    if (!addr) {
+      setStatus('Unsupported network for swap. Switch to mainnet or Sepolia.');
       return;
     }
     try {
@@ -79,29 +126,71 @@ export default function Swap() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
+    <div className="swap-card">
+      <div className="swap-header">
+        <div>
+          <p className="label">Wallet</p>
+          <p className="value">{isConnected ? address : 'Not connected'}</p>
+        </div>
         {isConnected ? (
-          <button onClick={() => disconnect()} className="px-3 py-1 bg-neutral-800 rounded">Disconnect {address?.slice(0,6)}...</button>
+          <button onClick={() => disconnect()} className="btn ghost">Disconnect</button>
         ) : (
-          <button onClick={handleConnect} className="px-3 py-1 bg-neutral-800 rounded">Connect Wallet</button>
+          <button onClick={handleConnect} className="btn primary">Connect Wallet</button>
         )}
       </div>
-      <div className="space-y-2">
-        <input
-          type="text"
-          placeholder="Amount in WETH"
-          value={amountIn}
-          onChange={(e) => setAmountIn(e.target.value)}
-          className="w-full p-2 bg-neutral-900 rounded"
-        />
-        <button onClick={getQuote} className="px-3 py-1 bg-neutral-700 rounded">Get Quote</button>
-        {quote && <div>Estimated USDC out: {quote}</div>}
+
+      <div className="field">
+        <label>Amount in WETH</label>
+        <div className="input-row">
+          <input
+            type="number"
+            min="0"
+            step="0.0001"
+            placeholder="0.25"
+            value={amountIn}
+            onChange={(e) => setAmountIn(e.target.value)}
+          />
+          <div className="preset-row">
+            {PRESETS.map((p) => (
+              <button key={p.label} onClick={() => setAmountIn(p.amount)} className="chip">
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      {isConnected && (
-        <button onClick={doSwap} className="px-3 py-1 bg-indigo-600 rounded">Swap</button>
+
+      <div className="field">
+        <label>Price source</label>
+        <div className="input-row">
+          <input
+            type="number"
+            min="0"
+            step="0.0001"
+            placeholder="Live or simulated rate"
+            value={manualRate}
+            onChange={(e) => setManualRate(e.target.value)}
+          />
+          <span className="hint">USDC per 1 WETH</span>
+        </div>
+      </div>
+
+      <div className="actions">
+        <button onClick={getQuote} className="btn secondary">Get Quote</button>
+        {isConnected && (
+          <button onClick={doSwap} className="btn primary">Swap</button>
+        )}
+      </div>
+
+      {quote && (
+        <div className="quote">
+          <p className="label">Estimated USDC out</p>
+          <p className="value">{quote}</p>
+          {usingSimulation && <p className="badge">Simulated from public price feed</p>}
+        </div>
       )}
-      {status && <div className="text-sm text-red-400">{status}</div>}
+
+      {status && <div className="status">{status}</div>}
     </div>
   );
 }
