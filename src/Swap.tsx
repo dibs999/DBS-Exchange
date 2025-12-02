@@ -66,6 +66,7 @@ export default function Swap({ prices }: SwapProps) {
       });
       setUsingSimulation(false);
       setQuote(formatUnits(q as bigint, 6));
+      setStatus(null);
     } catch (err: any) {
       // When RPC access is blocked or fails, fall back to simulated pricing.
       const rate = manualRate ? Number(manualRate) : derivedRate;
@@ -194,4 +195,3 @@ export default function Swap({ prices }: SwapProps) {
     </div>
   );
 }
-
