@@ -426,6 +426,8 @@ function AppContent() {
     { label: 'Fallback', value: 'CoinGecko + Etherchain' },
   ]), []);
 
+  const tableTabs = useMemo(() => t.tableTabs, [t]);
+
   return (
     <div className="page">
       <style>
