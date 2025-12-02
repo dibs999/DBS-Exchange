@@ -213,6 +213,7 @@ function Positions() {
 export default function App() {
   const primaryPair = useMemo(() => tradingPairs[0], []);
 
+function AppShell() {
   return (
     <div className="app-root">
       <div className="top-bar">
