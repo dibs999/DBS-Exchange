@@ -1,26 +1,74 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { WagmiConfig, useAccount, useConnect, useDisconnect } from 'wagmi';
-import { injected } from 'wagmi/connectors';
-import Swap from './Swap';
-import { wagmiConfig } from './config';
+import React, { useMemo, useRef } from 'react';
 import './App.css';
 
-const featuredPairs = ['BTCUSDT', 'ETHUSDT', 'OPUSDT', 'UNIUSDT', 'TIAUSDT'];
+const tradingPairs = [
+  { symbol: 'BTCUSDT', name: 'BTC/USDT', price: '62,745.21', change: '-2.34%' },
+  { symbol: 'ETHUSDT', name: 'ETH/USDT', price: '3,217.12', change: '+1.12%' },
+  { symbol: 'OPUSDT', name: 'OP/USDT', price: '2.107', change: '+6.51%' },
+  { symbol: 'UNIUSDT', name: 'UNI/USDT', price: '9.206', change: '+7.40%' },
+  { symbol: 'TIAUSDT', name: 'TIA/USDT', price: '12.407', change: '+10.50%' },
+];
 
-type LiveOrderBook = {
-  asks: { price: string; size: string }[];
-  bids: { price: string; size: string }[];
-  mark?: string;
+const orderBook = {
+  asks: [
+    { price: '62,755.0', size: '0.120' },
+    { price: '62,754.0', size: '0.285' },
+    { price: '62,753.0', size: '0.744' },
+    { price: '62,752.0', size: '1.046' },
+    { price: '62,751.0', size: '0.664' },
+  ],
+  bids: [
+    { price: '62,750.0', size: '0.930' },
+    { price: '62,749.0', size: '0.111' },
+    { price: '62,748.0', size: '0.548' },
+    { price: '62,747.0', size: '0.645' },
+    { price: '62,746.0', size: '0.284' },
+  ],
 };
 
-type TradeRow = { time: string; price: string; size: string; side: 'buy' | 'sell' };
+const recentTrades = [
+  { time: '06:24:14', price: '62,746.5', size: '0.008', side: 'sell' },
+  { time: '06:24:14', price: '62,747.0', size: '0.037', side: 'buy' },
+  { time: '06:24:13', price: '62,746.0', size: '0.191', side: 'sell' },
+  { time: '06:24:13', price: '62,747.0', size: '0.048', side: 'buy' },
+  { time: '06:24:12', price: '62,744.0', size: '0.246', side: 'sell' },
+];
 
-type GlobalStats = {
-  volume: string;
-  liquidity: string;
-  btcPrice: string;
-  updated: string;
-};
+const positions = [
+  {
+    id: '#1874128',
+    pair: 'BTCUSDT',
+    size: '0.50 BTC',
+    entry: '64,000.0',
+    mark: '62,750.5',
+    liq: '59,800',
+    roe: '-3.6%',
+  },
+];
+
+const featureCards = [
+  {
+    id: 'copy',
+    title: 'Copy trading',
+    value: '200,000',
+    detail: 'Weekly leaders with verified PnL and transparent metrics.',
+    accent: 'gradient-blue',
+  },
+  {
+    id: 'futures',
+    title: 'Futures open interest',
+    value: '$4.41B',
+    detail: 'Deep liquidity and auto-deleveraging protections.',
+    accent: 'gradient-gold',
+  },
+  {
+    id: 'volume',
+    title: '24H trading volume',
+    value: '74.22B',
+    detail: 'Spot and perpetual markets across 500+ pairs.',
+    accent: 'gradient-aqua',
+  },
+];
 
 function TradingViewChart({ symbol }: { symbol: string }) {
   const container = useRef<HTMLDivElement>(null);
@@ -66,7 +114,7 @@ function TradingViewChart({ symbol }: { symbol: string }) {
   );
 }
 
-function OrderBook({ asks, bids, mark }: LiveOrderBook) {
+function OrderBook({ asks, bids }: typeof orderBook) {
   return (
     <div className="panel orderbook">
       <div className="panel-header">
@@ -74,7 +122,7 @@ function OrderBook({ asks, bids, mark }: LiveOrderBook) {
           <p className="label">Order book</p>
           <p className="muted">Live depth and last matched price</p>
         </div>
-        <span className="price-ticker">{mark ?? '—'}</span>
+        <span className="price-ticker">62,750.5</span>
       </div>
 
       <div className="orderbook-grid">
@@ -108,11 +156,11 @@ function OrderBook({ asks, bids, mark }: LiveOrderBook) {
   );
 }
 
-function Trades({ trades }: { trades: TradeRow[] }) {
+function Trades() {
   return (
     <div className="panel trades">
       <div className="panel-header">
-        <p className="label">Trades (live)</p>
+        <p className="label">Trades</p>
         <button className="small-btn">All</button>
       </div>
       <div className="trades-head">
@@ -121,7 +169,7 @@ function Trades({ trades }: { trades: TradeRow[] }) {
         <span>Size (BTC)</span>
       </div>
       <div className="trade-list">
-        {trades.map((t, idx) => (
+        {recentTrades.map((t, idx) => (
           <div key={idx} className={`trade-row ${t.side}`}>
             <span>{t.time}</span>
             <span>{t.price}</span>
@@ -133,342 +181,161 @@ function Trades({ trades }: { trades: TradeRow[] }) {
   );
 }
 
-function ProtectedPanel({ children, title }: { children: React.ReactNode; title: string }) {
-  const { address, isConnected } = useAccount();
+function Positions() {
   return (
-    <div className="panel protected">
+    <div className="panel positions">
       <div className="panel-header">
-        <div>
-          <p className="label">{title}</p>
-          <p className="muted">
-            {isConnected
-              ? 'Ready to interact with the pools using your wallet.'
-              : 'Connect a wallet to unlock trading, deposits, and transfers.'}
-          </p>
-        </div>
-        <div className="pill">{isConnected ? address : 'Wallet required'}</div>
+        <p className="label">Positions</p>
+        <button className="small-btn ghost">Open orders</button>
       </div>
-      {isConnected ? children : <div className="blocked">Wallet not connected.</div>}
-    </div>
-  );
-}
-
-function StatsGrid({ stats }: { stats: GlobalStats | null }) {
-  const cards = stats
-    ? [
-        { id: 'volume', title: '24H trading volume', value: stats.volume, detail: 'Across top DEX venues' },
-        { id: 'liquidity', title: 'On-chain TVL', value: stats.liquidity, detail: 'Total liquidity secured' },
-        { id: 'btc', title: 'BTC spot', value: stats.btcPrice, detail: 'Live Coinbase reference' },
-      ]
-    : [
-        { id: 'volume', title: '24H trading volume', value: 'Loading…', detail: 'Across top DEX venues' },
-        { id: 'liquidity', title: 'On-chain TVL', value: 'Loading…', detail: 'Total liquidity secured' },
-        { id: 'btc', title: 'BTC spot', value: 'Loading…', detail: 'Live Coinbase reference' },
-      ];
-
-  return (
-    <section className="features" id="copy">
-      {cards.map((card) => (
-        <div key={card.id} className={`feature-card gradient-${card.id}`}>
-          <div>
-            <p className="muted">{card.title}</p>
-            <h3>{card.value}</h3>
-            <p className="muted small">{card.detail}</p>
-          </div>
-          <span className="pill pill-blue">{stats?.updated ?? 'Live'}</span>
+      <div className="position-head">
+        <span>Pair</span>
+        <span>Size</span>
+        <span>Entry</span>
+        <span>Mark</span>
+        <span>Liq</span>
+        <span>ROE</span>
+      </div>
+      {positions.map((p) => (
+        <div key={p.id} className="position-row">
+          <span>{p.pair}</span>
+          <span>{p.size}</span>
+          <span>{p.entry}</span>
+          <span>{p.mark}</span>
+          <span>{p.liq}</span>
+          <span className="text-negative">{p.roe}</span>
         </div>
       ))}
-    </section>
-  );
-}
-
-function TopBar() {
-  const { isConnected, address } = useAccount();
-  const { connectAsync, connectors } = useConnect({ connector: injected() });
-  const { disconnect } = useDisconnect();
-
-  const injectedConnector = connectors.find((c) => c.id === 'injected') ?? connectors[0];
-
-  return (
-    <div className="top-bar">
-      <div className="logo">DBS Exchange</div>
-      <nav className="nav">
-        <a href="#exchange">Exchange</a>
-        <a href="#futures">Futures</a>
-        <a href="#earn">Earn</a>
-        <a href="#web3">Web3</a>
-      </nav>
-      <div className="nav-actions">
-        {isConnected ? (
-          <>
-            <div className="pill">{address}</div>
-            <button className="ghost-btn" onClick={() => disconnect()}>
-              Disconnect
-            </button>
-          </>
-        ) : (
-          <button
-            className="primary-btn"
-            disabled={!injectedConnector}
-            onClick={() => injectedConnector && connectAsync({ connector: injectedConnector })}
-          >
-            {injectedConnector ? 'Connect wallet' : 'No wallet found'}
-          </button>
-        )}
-      </div>
     </div>
-  );
-}
-
-function Hero({ stats }: { stats: GlobalStats | null }) {
-  const { isConnected } = useAccount();
-  return (
-    <section className="hero" id="exchange">
-      <div className="hero-left">
-        <span className="hero-chip">Decentralized derivatives</span>
-        <h1>Trade with live liquidity & Web3 sign-in.</h1>
-        <p className="muted">
-          Connect your wallet, view real-time books, and route swaps through on-chain liquidity pools with no custodial
-          accounts required.
-        </p>
-        <div className="hero-note">{isConnected ? 'Wallet connected. Ready to trade.' : 'No registration needed—use your wallet.'}</div>
-      </div>
-      <div className="hero-right">
-        <div className="hero-card">
-          <div>
-            <p className="muted">24H Volume</p>
-            <h3>{stats?.volume ?? 'Loading…'}</h3>
-            <p className="pill">DEX tracked</p>
-          </div>
-          <div>
-            <p className="muted">Total Liquidity</p>
-            <h3>{stats?.liquidity ?? 'Loading…'}</h3>
-            <p className="pill pill-blue">Updated {stats?.updated ?? '—'}</p>
-          </div>
-        </div>
-        <div className="hero-markets">
-          {featuredPairs.map((pair) => (
-            <div key={pair} className="market-chip">
-              <div>
-                <p className="label">{pair.replace('USDT', '/USDT')}</p>
-                <strong>Live</strong>
-              </div>
-              <span className="text-positive">Book</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Terminal({ orderbook, trades }: { orderbook: LiveOrderBook; trades: TradeRow[] }) {
-  const primaryPair = useMemo(() => featuredPairs[0], []);
-
-  return (
-    <section className="terminal" id="futures">
-      <div className="terminal-header">
-        <div>
-          <p className="label">Perpetual futures</p>
-          <h2>{primaryPair.replace('USDT', '/USDT')}</h2>
-          <p className="muted">Cross-margin, real-time order book, and embedded TradingView chart.</p>
-        </div>
-      </div>
-
-      <div className="terminal-grid">
-        <div className="chart-panel">
-          <TradingViewChart symbol={`BINANCE:${primaryPair}`} />
-        </div>
-        <div className="side-panels">
-          <OrderBook asks={orderbook.asks} bids={orderbook.bids} mark={orderbook.mark} />
-          <Trades trades={trades} />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Earn() {
-  return (
-    <section className="earn" id="earn">
-      <div className="earn-card">
-        <div>
-          <p className="label">Liquidity pools</p>
-          <h3>Provide liquidity & earn fees</h3>
-          <p className="muted">Stake USDC, WETH, or WBTC into concentrated liquidity ranges and earn swap fees.</p>
-        </div>
-        <a href="#web3" className="primary-btn">
-          View pools
-        </a>
-      </div>
-      <div className="wallet-card" id="web3">
-        <div>
-          <p className="label">Wallet</p>
-          <h3>Secure Web3 access</h3>
-          <p className="muted">Connect a wallet to sign orders, transfer funds, and deploy liquidity.</p>
-        </div>
-        <div className="wallet-stats">
-          <div>
-            <p className="muted">Gas price</p>
-            <strong>Live from network</strong>
-          </div>
-          <div>
-            <p className="muted">Networks</p>
-            <strong>Ethereum &amp; Sepolia</strong>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function AccountActions() {
-  const { isConnected } = useAccount();
-  if (!isConnected) return null;
-  return (
-    <div className="account-actions">
-      <button className="ghost-btn">Deposit</button>
-      <button className="primary-btn">Transfer</button>
-      <button className="ghost-btn">Withdraw</button>
-    </div>
-  );
-}
-
-function WalletArea({ priceFeed }: { priceFeed: Record<string, { usd: number; change24h?: number }> }) {
-  return (
-    <ProtectedPanel title="Wallet trading">
-      <div className="wallet-grid">
-        <Swap prices={priceFeed} />
-        <div className="liquidity-panel">
-          <h4>Liquidity provisioning</h4>
-          <p className="muted">
-            Deploy liquidity into Uniswap v3-style pools and earn proportional swap fees. Choose your price band and fund the
-            position straight from your wallet.
-          </p>
-          <AccountActions />
-        </div>
-      </div>
-    </ProtectedPanel>
-  );
-}
-
-function DataFetcher({ children }: { children: (data: {
-  orderbook: LiveOrderBook;
-  trades: TradeRow[];
-  stats: GlobalStats | null;
-  priceFeed: Record<string, { usd: number; change24h?: number }>;
-}) => React.ReactNode }) {
-  const [orderbook, setOrderbook] = useState<LiveOrderBook>({ asks: [], bids: [], mark: undefined });
-  const [trades, setTrades] = useState<TradeRow[]>([]);
-  const [stats, setStats] = useState<GlobalStats | null>(null);
-  const [priceFeed, setPriceFeed] = useState<Record<string, { usd: number; change24h?: number }>>({});
-
-  useEffect(() => {
-    async function loadDepth() {
-      try {
-        const depth = await fetch('https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=10').then((r) => r.json());
-        const book: LiveOrderBook = {
-          asks: depth.asks.map((a: string[]) => ({ price: Number(a[0]).toFixed(2), size: Number(a[1]).toFixed(3) })),
-          bids: depth.bids.map((b: string[]) => ({ price: Number(b[0]).toFixed(2), size: Number(b[1]).toFixed(3) })),
-          mark: depth?.asks?.[0]?.[0] ?? undefined,
-        };
-        setOrderbook(book);
-      } catch (err) {
-        setOrderbook({
-          asks: [
-            { price: '—', size: '—' },
-          ],
-          bids: [
-            { price: '—', size: '—' },
-          ],
-        });
-      }
-    }
-
-    async function loadTrades() {
-      try {
-        const resp = await fetch('https://api.binance.com/api/v3/trades?symbol=BTCUSDT&limit=15').then((r) => r.json());
-        const mapped: TradeRow[] = resp.map((t: any) => ({
-          time: new Date(t.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          price: Number(t.price).toFixed(2),
-          size: Number(t.qty).toFixed(4),
-          side: t.isBuyerMaker ? 'sell' : 'buy',
-        }));
-        setTrades(mapped);
-      } catch (err) {
-        setTrades([]);
-      }
-    }
-
-    async function loadStats() {
-      try {
-        const [global, llama, prices] = await Promise.all([
-          fetch('https://api.coingecko.com/api/v3/global').then((r) => r.json()),
-          fetch('https://api.llama.fi/tvl/uniswap').then((r) => r.json()),
-          fetch(
-            'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,usd-coin&vs_currencies=usd&include_24hr_change=true',
-          ).then((r) => r.json()),
-        ]);
-
-        const volume = global.data.total_volume.usd;
-        const btcPrice = prices.bitcoin.usd;
-        const change = prices.bitcoin.usd_24h_change;
-        const liquidity = llama;
-        setStats({
-          volume: `$${Number(volume).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-          liquidity: `$${Number(liquidity).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-          btcPrice: `$${btcPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })} (${change.toFixed(2)}%)`,
-          updated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        });
-        setPriceFeed({
-          'bitcoin': { usd: prices.bitcoin.usd, change24h: prices.bitcoin.usd_24h_change },
-          'ethereum': { usd: prices.ethereum.usd, change24h: prices.ethereum.usd_24h_change },
-          'usd-coin': { usd: prices['usd-coin'].usd, change24h: prices['usd-coin'].usd_24h_change },
-        });
-      } catch (err) {
-        setStats(null);
-      }
-    }
-
-    loadDepth();
-    loadTrades();
-    loadStats();
-    const id = setInterval(() => {
-      loadDepth();
-      loadTrades();
-      loadStats();
-    }, 15000);
-    return () => clearInterval(id);
-  }, []);
-
-  return <>{children({ orderbook, trades, stats, priceFeed })}</>;
-}
-
-function AppShell() {
-  return (
-    <DataFetcher
-      children={({ orderbook, trades, stats, priceFeed }) => {
-        return (
-          <div className="app-root">
-            <TopBar />
-            <main className="layout">
-              <Hero stats={stats} />
-              <StatsGrid stats={stats} />
-              <Terminal orderbook={orderbook} trades={trades} />
-              <Earn />
-              <WalletArea priceFeed={priceFeed} />
-            </main>
-          </div>
-        );
-      }}
-    />
   );
 }
 
 export default function App() {
+  const primaryPair = useMemo(() => tradingPairs[0], []);
+
+function AppShell() {
   return (
-    <WagmiConfig config={wagmiConfig}>
-      <AppShell />
-    </WagmiConfig>
+    <div className="app-root">
+      <div className="top-bar">
+        <div className="logo">DBS Exchange</div>
+        <nav className="nav">
+          <a href="#exchange">Exchange</a>
+          <a href="#futures">Futures</a>
+          <a href="#earn">Earn</a>
+          <a href="#copy">Copy trading</a>
+          <a href="#web3">Web3</a>
+        </nav>
+        <div className="nav-actions">
+          <button className="ghost-btn">Log in</button>
+          <button className="primary-btn">Sign up</button>
+        </div>
+      </div>
+
+      <main className="layout">
+        <section className="hero" id="exchange">
+          <div className="hero-left">
+            <span className="hero-chip">Premium crypto derivatives</span>
+            <h1>Trade with institutional-grade liquidity.</h1>
+            <p className="muted">Ultra-fast order matching, deep books, and embedded TradingView charts so you can react instantly.</p>
+            <div className="hero-form">
+              <input placeholder="Email/Phone number" />
+              <button className="hero-cta">Start now</button>
+            </div>
+            <p className="hero-note">Join 120M+ users and unlock welcome rewards worth up to 5,000 USDT when you trade today.</p>
+          </div>
+          <div className="hero-right">
+            <div className="hero-card">
+              <div>
+                <p className="muted">Copy trading</p>
+                <h3>200,000</h3>
+                <p className="pill">Weekly traders</p>
+              </div>
+              <div>
+                <p className="muted">Current volume</p>
+                <h3>74.22B</h3>
+                <p className="pill pill-blue">+10% today</p>
+              </div>
+            </div>
+            <div className="hero-markets">
+              {tradingPairs.map((pair) => (
+                <div key={pair.symbol} className="market-chip">
+                  <div>
+                    <p className="label">{pair.name}</p>
+                    <strong>{pair.price}</strong>
+                  </div>
+                  <span className={pair.change.startsWith('-') ? 'text-negative' : 'text-positive'}>{pair.change}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="features" id="copy">
+          {featureCards.map((card) => (
+            <div key={card.id} className={`feature-card ${card.accent}`}>
+              <div>
+                <p className="muted">{card.title}</p>
+                <h3>{card.value}</h3>
+                <p className="muted small">{card.detail}</p>
+              </div>
+              <button className="link-btn">View</button>
+            </div>
+          ))}
+        </section>
+
+        <section className="terminal" id="futures">
+          <div className="terminal-header">
+            <div>
+              <p className="label">Perpetual futures</p>
+              <h2>{primaryPair.name}</h2>
+              <p className="muted">Cross and isolated margin, 125x leverage, and dual-price liquidation protection.</p>
+            </div>
+            <div className="terminal-actions">
+              <button className="ghost-btn">Deposit</button>
+              <button className="primary-btn">Transfer</button>
+            </div>
+          </div>
+
+          <div className="terminal-grid">
+            <div className="chart-panel">
+              <TradingViewChart symbol={`BINANCE:${primaryPair.symbol}`} />
+            </div>
+            <div className="side-panels">
+              <OrderBook asks={orderBook.asks} bids={orderBook.bids} />
+              <Trades />
+              <Positions />
+            </div>
+          </div>
+        </section>
+
+        <section className="earn" id="earn">
+          <div className="earn-card">
+            <div>
+              <p className="label">Earn & staking</p>
+              <h3>Boost your idle balances</h3>
+              <p className="muted">Launchpools, dual-invest products, and flexible savings with daily rewards.</p>
+            </div>
+            <button className="primary-btn">Explore Earn</button>
+          </div>
+          <div className="wallet-card" id="web3">
+            <div>
+              <p className="label">Wallet</p>
+              <h3>Secure Web3 access</h3>
+              <p className="muted">Manage assets, connect to dApps, and swap cross-chain with institutional security.</p>
+            </div>
+            <div className="wallet-stats">
+              <div>
+                <p className="muted">Gas price</p>
+                <strong>24 gwei</strong>
+              </div>
+              <div>
+                <p className="muted">Networks</p>
+                <strong>Ethereum & Sepolia</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
   );
 }
