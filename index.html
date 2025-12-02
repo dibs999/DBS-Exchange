@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DBS Exchange</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-root">
+      <header class="top-bar">
+        <div class="logo">DBS Exchange</div>
+        <nav class="nav">
+          <a href="#exchange">Exchange</a>
+          <a href="#futures">Futures</a>
+          <a href="#earn">Earn</a>
+          <a href="#copy">Copy trading</a>
+          <a href="#web3">Web3</a>
+        </nav>
+        <div class="nav-actions">
+          <button class="ghost-btn">Log in</button>
+          <button class="primary-btn">Sign up</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="hero" id="exchange">
+          <div class="hero-left">
+            <span class="hero-chip">Premium crypto derivatives</span>
+            <h1>Trade with institutional-grade liquidity.</h1>
+            <p class="muted">
+              Ultra-fast order matching, deep books, and embedded TradingView charts so you can react instantly.
+            </p>
+            <div class="hero-form">
+              <input placeholder="Email/Phone number" />
+              <button class="hero-cta">Start now</button>
+            </div>
+            <p class="hero-note">
+              Join 120M+ users and unlock welcome rewards worth up to 5,000 USDT when you trade today.
+            </p>
+          </div>
+          <div class="hero-right">
+            <div class="hero-card">
+              <div>
+                <p class="muted">Copy trading</p>
+                <h3>200,000</h3>
+                <p class="pill">Weekly traders</p>
+              </div>
+              <div>
+                <p class="muted">Current volume</p>
+                <h3>74.22B</h3>
+                <p class="pill pill-blue">+10% today</p>
+              </div>
+            </div>
+            <div class="hero-markets" id="market-ticker"></div>
+          </div>
+        </section>
+
+        <section class="features" id="copy"></section>
+
+        <section class="terminal" id="futures">
+          <div class="terminal-header">
+            <div>
+              <p class="label">Perpetual futures</p>
+              <h2 id="primary-pair">BTC/USDT</h2>
+              <p class="muted">Cross and isolated margin, 125x leverage, and dual-price liquidation protection.</p>
+            </div>
+            <div class="terminal-actions">
+              <button class="ghost-btn">Deposit</button>
+              <button class="primary-btn">Transfer</button>
+            </div>
+          </div>
+
+          <div class="terminal-grid">
+            <div class="chart-panel">
+              <div id="tv-chart"></div>
+            </div>
+            <div class="side-panels">
+              <div class="panel orderbook">
+                <div class="panel-header">
+                  <div>
+                    <p class="label">Order book</p>
+                    <p class="muted">Live depth and last matched price</p>
+                  </div>
+                  <span class="price-ticker">62,750.5</span>
+                </div>
+                <div class="orderbook-grid" id="orderbook"></div>
+              </div>
+              <div class="panel trades">
+                <div class="panel-header">
+                  <p class="label">Trades</p>
+                  <button class="small-btn">All</button>
+                </div>
+                <div class="trades-head">
+                  <span>Time</span>
+                  <span>Price (USD)</span>
+                  <span>Size (BTC)</span>
+                </div>
+                <div class="trade-list" id="trade-list"></div>
+              </div>
+              <div class="panel positions">
+                <div class="panel-header">
+                  <p class="label">Positions</p>
+                  <button class="small-btn ghost">Open orders</button>
+                </div>
+                <div class="position-head">
+                  <span>Pair</span>
+                  <span>Size</span>
+                  <span>Entry</span>
+                  <span>Mark</span>
+                  <span>Liq</span>
+                  <span>ROE</span>
+                </div>
+                <div id="positions"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="earn" id="earn">
+          <div class="earn-card">
+            <div>
+              <p class="label">Earn & staking</p>
+              <h3>Boost your idle balances</h3>
+              <p class="muted">Launchpools, dual-invest products, and flexible savings with daily rewards.</p>
+            </div>
+            <button class="primary-btn">Explore Earn</button>
+          </div>
+          <div class="wallet-card" id="web3">
+            <div>
+              <p class="label">Wallet</p>
+              <h3>Secure Web3 access</h3>
+              <p class="muted">Manage assets, connect to dApps, and swap cross-chain with institutional security.</p>
+            </div>
+            <div class="wallet-stats">
+              <div>
+                <p class="muted">Gas price</p>
+                <strong>24 gwei</strong>
+              </div>
+              <div>
+                <p class="muted">Networks</p>
+                <strong>Ethereum & Sepolia</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    <script>
+      const tradingPairs = [
+        { symbol: 'BINANCE:BTCUSDT', name: 'BTC/USDT', price: '62,745.21', change: '-2.34%' },
+        { symbol: 'BINANCE:ETHUSDT', name: 'ETH/USDT', price: '3,217.12', change: '+1.12%' },
+        { symbol: 'BINANCE:OPUSDT', name: 'OP/USDT', price: '2.107', change: '+6.51%' },
+        { symbol: 'BINANCE:UNIUSDT', name: 'UNI/USDT', price: '9.206', change: '+7.40%' },
+        { symbol: 'BINANCE:TIAUSDT', name: 'TIA/USDT', price: '12.407', change: '+10.50%' },
+      ];
+
+      const featureCards = [
+        {
+          id: 'copy',
+          title: 'Copy trading',
+          value: '200,000',
+          detail: 'Weekly leaders with verified PnL and transparent metrics.',
+          accent: 'gradient-blue',
+        },
+        {
+          id: 'futures',
+          title: 'Futures open interest',
+          value: '$4.41B',
+          detail: 'Deep liquidity and auto-deleveraging protections.',
+          accent: 'gradient-gold',
+        },
+        {
+          id: 'volume',
+          title: '24H trading volume',
+          value: '74.22B',
+          detail: 'Spot and perpetual markets across 500+ pairs.',
+          accent: 'gradient-aqua',
+        },
+      ];
+
+      const orderBook = {
+        asks: [
+          { price: '62,755.0', size: '0.120' },
+          { price: '62,754.0', size: '0.285' },
+          { price: '62,753.0', size: '0.744' },
+          { price: '62,752.0', size: '1.046' },
+          { price: '62,751.0', size: '0.664' },
+        ],
+        bids: [
+          { price: '62,750.0', size: '0.930' },
+          { price: '62,749.0', size: '0.111' },
+          { price: '62,748.0', size: '0.548' },
+          { price: '62,747.0', size: '0.645' },
+          { price: '62,746.0', size: '0.284' },
+        ],
+      };
+
+      const trades = [
+        { time: '06:24:14', price: '62,746.5', size: '0.008', side: 'sell' },
+        { time: '06:24:14', price: '62,747.0', size: '0.037', side: 'buy' },
+        { time: '06:24:13', price: '62,746.0', size: '0.191', side: 'sell' },
+        { time: '06:24:13', price: '62,747.0', size: '0.048', side: 'buy' },
+        { time: '06:24:12', price: '62,744.0', size: '0.246', side: 'sell' },
+      ];
+
+      const positions = [
+        {
+          id: '#1874128',
+          pair: 'BTCUSDT',
+          size: '0.50 BTC',
+          entry: '64,000.0',
+          mark: '62,750.5',
+          liq: '59,800',
+          roe: '-3.6%',
+        },
+      ];
+
+      function renderMarkets() {
+        const container = document.getElementById('market-ticker');
+        container.innerHTML = '';
+        tradingPairs.forEach((pair) => {
+          const row = document.createElement('div');
+          row.className = 'market-chip';
+          row.innerHTML = `
+            <div>
+              <p class="label">${pair.name}</p>
+              <strong>${pair.price}</strong>
+            </div>
+            <span class="${pair.change.startsWith('-') ? 'text-negative' : 'text-positive'}">${pair.change}</span>
+          `;
+          container.appendChild(row);
+        });
+      }
+
+      function renderFeatures() {
+        const container = document.querySelector('.features');
+        featureCards.forEach((card) => {
+          const node = document.createElement('div');
+          node.className = `feature-card ${card.accent}`;
+          node.innerHTML = `
+            <div>
+              <p class="muted">${card.title}</p>
+              <h3>${card.value}</h3>
+              <p class="muted small">${card.detail}</p>
+            </div>
+            <button class="link-btn">View</button>
+          `;
+          container.appendChild(node);
+        });
+      }
+
+      function renderOrderBook() {
+        const container = document.getElementById('orderbook');
+        container.innerHTML = '';
+
+        const asksCol = document.createElement('div');
+        asksCol.innerHTML = `
+          <div class="orderbook-head">
+            <span>Price (USD)</span>
+            <span>Size (BTC)</span>
+          </div>
+        `;
+        orderBook.asks.forEach((row, idx) => {
+          const r = document.createElement('div');
+          r.className = 'orderbook-row ask';
+          r.innerHTML = `<span>${row.price}</span><span>${row.size}</span>`;
+          r.id = `ask-${idx}`;
+          asksCol.appendChild(r);
+        });
+
+        const bidsCol = document.createElement('div');
+        bidsCol.innerHTML = `
+          <div class="orderbook-head">
+            <span>Price (USD)</span>
+            <span>Size (BTC)</span>
+          </div>
+        `;
+        orderBook.bids.forEach((row, idx) => {
+          const r = document.createElement('div');
+          r.className = 'orderbook-row bid';
+          r.innerHTML = `<span>${row.price}</span><span>${row.size}</span>`;
+          r.id = `bid-${idx}`;
+          bidsCol.appendChild(r);
+        });
+
+        container.appendChild(asksCol);
+        container.appendChild(bidsCol);
+      }
+
+      function renderTrades() {
+        const container = document.getElementById('trade-list');
+        trades.forEach((t) => {
+          const row = document.createElement('div');
+          row.className = `trade-row ${t.side}`;
+          row.innerHTML = `<span>${t.time}</span><span>${t.price}</span><span>${t.size}</span>`;
+          container.appendChild(row);
+        });
+      }
+
+      function renderPositions() {
+        const container = document.getElementById('positions');
+        positions.forEach((p) => {
+          const row = document.createElement('div');
+          row.className = 'position-row';
+          row.innerHTML = `
+            <span>${p.pair}</span>
+            <span>${p.size}</span>
+            <span>${p.entry}</span>
+            <span>${p.mark}</span>
+            <span>${p.liq}</span>
+            <span class="text-negative">${p.roe}</span>
+          `;
+          container.appendChild(row);
+        });
+      }
+
+      function mountTradingView(symbol) {
+        if (!window.TradingView) return;
+        document.getElementById('tv-chart').innerHTML = '';
+        new TradingView.widget({
+          autosize: true,
+          symbol,
+          interval: '60',
+          timezone: 'Etc/UTC',
+          theme: 'dark',
+          style: '1',
+          locale: 'en',
+          enable_publishing: false,
+          allow_symbol_change: true,
+          hide_side_toolbar: false,
+          withdateranges: true,
+          studies: ['MASimple@tv-basicstudies'],
+          container_id: 'tv-chart',
+          support_host: 'https://www.tradingview.com',
+        });
+      }
+
+      function init() {
+        renderMarkets();
+        renderFeatures();
+        renderOrderBook();
+        renderTrades();
+        renderPositions();
+        mountTradingView(tradingPairs[0].symbol);
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    </script>
+  </body>
+</html>
