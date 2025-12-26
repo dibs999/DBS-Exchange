@@ -55,8 +55,12 @@ export default function Swap({ prices }: SwapProps) {
 
   async function getQuote() {
     try {
-      if (!amountIn) return;
+      if (!amountIn || Number(amountIn) <= 0) {
+        setStatus('Enter a valid amount.');
+        return;
+      }
       if (!addr) throw new Error('Unsupported network');
+      if (!publicClient) throw new Error('RPC client not ready');
       const amt = parseUnits(amountIn, 18); // assume WETH input
       const q = await publicClient.readContract({
         address: addr.QUOTER_V2,
@@ -91,7 +95,15 @@ export default function Swap({ prices }: SwapProps) {
       setStatus('Unsupported network for swap. Switch to mainnet or Sepolia.');
       return;
     }
+    if (!publicClient) {
+      setStatus('RPC client not ready');
+      return;
+    }
     try {
+      if (!amountIn || Number(amountIn) <= 0) {
+        setStatus('Enter a valid amount.');
+        return;
+      }
       const amtIn = parseUnits(amountIn || '0', 18);
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
       const { request } = await publicClient.simulateContract({

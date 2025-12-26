@@ -68,7 +68,7 @@ export function nowStr() {
 }
 
 export function formatAmt(x: number, digits = 6) {
-  if (!isFinite(x)) return '—';
+  if (!isFinite(x)) return '--';
   if (Math.abs(x) >= 1000) return x.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (Math.abs(x) >= 1) return x.toLocaleString(undefined, { maximumFractionDigits: 4 });
   return x.toLocaleString(undefined, { maximumFractionDigits: digits });

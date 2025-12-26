@@ -1,13 +1,15 @@
 {
   "name": "dbs-exchange",
-  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "test": "echo 'No tests'"
-  },
-  "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "wagmi": "^1.4.5",
-    "viem": "^1.0.0"
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "deploy:sepolia": "pnpm --filter @dbs/contracts deploy:sepolia"
   }
 }
