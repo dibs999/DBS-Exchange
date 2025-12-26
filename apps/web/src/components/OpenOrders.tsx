@@ -1,10 +1,61 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { Order } from '@dbs/shared';
 import { formatNumber, formatUsd } from '../lib/format';
+import { ORDERBOOK_ABI, ORDERBOOK_ADDRESS, ORDERBOOK_READY } from '../contracts';
+import { useToast } from './Toast';
 
 export default function OpenOrders({ data }: { data: Order[] }) {
+  const { address, isConnected } = useAccount();
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
+  const { addToast } = useToast();
+  
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  async function handleCancelOrder(order: Order) {
+    if (!walletClient || !publicClient || !address || !ORDERBOOK_READY) return;
+
+    setCancellingId(order.id);
+    try {
+      const { request } = await publicClient.simulateContract({
+        address: ORDERBOOK_ADDRESS,
+        abi: ORDERBOOK_ABI,
+        functionName: 'cancelOrder',
+        args: [BigInt(order.id)],
+        account: address,
+      });
+
+      const hash = await walletClient.writeContract(request);
+      addToast({
+        type: 'info',
+        title: 'Cancelling order',
+        message: `Cancelling ${order.type} order #${order.id.slice(-6)}...`,
+        txHash: hash,
+      });
+
+      await publicClient.waitForTransactionReceipt({ hash });
+      addToast({
+        type: 'success',
+        title: 'Order cancelled',
+        message: `Order #${order.id.slice(-6)} has been cancelled.`,
+      });
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Failed to cancel order',
+        message: err?.shortMessage || err?.message || 'Unknown error',
+      });
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  const openOrders = data.filter(o => o.status === 'open');
+  const recentOrders = data.filter(o => o.status !== 'open').slice(0, 5);
+
   return (
-    <div className="panel">
+    <div className="panel open-orders-panel">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Orders</p>
@@ -12,27 +63,72 @@ export default function OpenOrders({ data }: { data: Order[] }) {
         </div>
         <button className="chip ghost">Live</button>
       </div>
-      <div className="orders-head">
-        <span>ID</span>
-        <span>Type</span>
-        <span>Side</span>
-        <span>Size</span>
-        <span>Trigger</span>
-        <span>Status</span>
-      </div>
-      {data.length === 0 ? (
-        <p className="muted small">No open orders yet.</p>
-      ) : (
-        data.map((order) => (
-          <div key={order.id} className="orders-row">
-            <span>#{order.id.slice(-6)}</span>
-            <span>{order.type}</span>
-            <span className={order.side === 'buy' ? 'text-positive' : 'text-negative'}>{order.side}</span>
-            <span>{formatNumber(order.size, 4)}</span>
-            <span>{order.triggerPrice ? formatUsd(order.triggerPrice, 2) : '--'}</span>
-            <span>{order.status}</span>
+
+      {openOrders.length > 0 && (
+        <>
+          <p className="muted small" style={{ marginBottom: 8 }}>Open Orders</p>
+          <div className="orders-head">
+            <span>ID</span>
+            <span>Type</span>
+            <span>Side</span>
+            <span>Size</span>
+            <span>Trigger</span>
+            <span></span>
           </div>
-        ))
+          {openOrders.map((order) => (
+            <div key={order.id} className="orders-row">
+              <span>#{order.id.slice(-6)}</span>
+              <span className="order-type-badge">{order.type}</span>
+              <span className={order.side === 'buy' ? 'text-positive' : 'text-negative'}>
+                {order.side.toUpperCase()}
+              </span>
+              <span>{formatNumber(order.size, 4)}</span>
+              <span>{order.triggerPrice ? formatUsd(order.triggerPrice, 2) : '--'}</span>
+              <span className="order-actions-cell">
+                <button
+                  className="btn-cancel-order"
+                  onClick={() => handleCancelOrder(order)}
+                  disabled={cancellingId === order.id || !isConnected}
+                  title="Cancel order"
+                >
+                  {cancellingId === order.id ? '...' : '✕'}
+                </button>
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {recentOrders.length > 0 && (
+        <>
+          <p className="muted small" style={{ marginTop: 16, marginBottom: 8 }}>Recent Orders</p>
+          <div className="orders-head">
+            <span>ID</span>
+            <span>Type</span>
+            <span>Side</span>
+            <span>Size</span>
+            <span>Trigger</span>
+            <span>Status</span>
+          </div>
+          {recentOrders.map((order) => (
+            <div key={order.id} className="orders-row">
+              <span>#{order.id.slice(-6)}</span>
+              <span className="order-type-badge">{order.type}</span>
+              <span className={order.side === 'buy' ? 'text-positive' : 'text-negative'}>
+                {order.side.toUpperCase()}
+              </span>
+              <span>{formatNumber(order.size, 4)}</span>
+              <span>{order.triggerPrice ? formatUsd(order.triggerPrice, 2) : '--'}</span>
+              <span className={`order-status order-status-${order.status}`}>
+                {order.status}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {data.length === 0 && (
+        <p className="muted small">No open orders yet.</p>
       )}
     </div>
   );
