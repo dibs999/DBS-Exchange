@@ -1,9 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { formatUnits, parseUnits } from 'viem';
 import { COLLATERAL_ABI, COLLATERAL_ADDRESS, ENGINE_ABI, ENGINE_ADDRESS, ENGINE_READY } from '../contracts';
 import { formatNumber } from '../lib/format';
 import { useToast } from './Toast';
+import ConfirmDialog from './ConfirmDialog';
+import { useSettings } from '../lib/settings';
+import { FocusTrap } from './Accessibility';
+import { useI18n } from '../lib/i18n';
 
 type DepositWithdrawModalProps = {
   mode: 'deposit' | 'withdraw';
@@ -16,11 +20,25 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { addToast } = useToast();
+  const { settings } = useSettings();
 
   const [amount, setAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState<number>(0);
   const [allowance, setAllowance] = useState<bigint>(0n);
   const [loading, setLoading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Handle ESC key
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape' && isOpen) {
+      onClose();
+    }
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   useEffect(() => {
     async function loadData() {
@@ -111,6 +129,11 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
   async function handleSubmit() {
     if (!walletClient || !publicClient || !address || !amount) return;
 
+    if (settings.showConfirmations && !confirmOpen) {
+      setConfirmOpen(true);
+      return;
+    }
+
     setLoading(true);
     try {
       const functionName = mode === 'deposit' ? 'deposit' : 'withdraw';
@@ -148,10 +171,13 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
     }
   }
 
+  const { t } = useI18n();
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
+    <FocusTrap isActive={isOpen}>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby={`${mode}-modal-title`}>
+          <div className="modal-header">
           <h3>{mode === 'deposit' ? 'Deposit oUSD' : 'Withdraw oUSD'}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
@@ -209,7 +235,66 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
           </button>
         </div>
       </div>
-    </div>
+
+      <ConfirmDialog
+        isOpen={confirmOpen}
+        title={mode === 'deposit' ? 'Confirm deposit' : 'Confirm withdrawal'}
+        message="Please confirm the details below. This will submit an on-chain transaction."
+        confirmText={mode === 'deposit' ? 'Deposit' : 'Withdraw'}
+        cancelText="Cancel"
+        variant={mode === 'withdraw' ? 'danger' : 'warning'}
+        details={[
+          { label: 'Amount', value: `${amount || '0'} oUSD` },
+          { label: 'Available', value: `${formatNumber(maxAmount, 2)} oUSD` },
+        ]}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          // execute real submit now
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          (async () => {
+            if (!walletClient || !publicClient || !address || !amount) return;
+            setLoading(true);
+            try {
+              const functionName = mode === 'deposit' ? 'deposit' : 'withdraw';
+              const { request } = await publicClient.simulateContract({
+                address: ENGINE_ADDRESS,
+                abi: ENGINE_ABI,
+                functionName,
+                args: [amountBigInt],
+                account: address,
+              });
+
+              const hash = await walletClient.writeContract(request);
+              addToast({
+                type: 'info',
+                title: `${mode === 'deposit' ? 'Deposit' : 'Withdrawal'} submitted`,
+                message: 'Waiting for confirmation...',
+                txHash: hash,
+              });
+
+              await publicClient.waitForTransactionReceipt({ hash });
+              addToast({
+                type: 'success',
+                title: `${mode === 'deposit' ? 'Deposit' : 'Withdrawal'} confirmed`,
+                message: `${amount} oUSD ${mode === 'deposit' ? 'deposited' : 'withdrawn'} successfully.`,
+              });
+              onClose();
+            } catch (err: any) {
+              addToast({
+                type: 'error',
+                title: `${mode === 'deposit' ? 'Deposit' : 'Withdrawal'} failed`,
+                message: err?.shortMessage || err?.message || 'Unknown error',
+              });
+            } finally {
+              setLoading(false);
+            }
+          })();
+        }}
+      />
+        </div>
+      </div>
+    </FocusTrap>
   );
 }
 

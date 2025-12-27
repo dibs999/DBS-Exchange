@@ -4,16 +4,20 @@ import { Order } from '@dbs/shared';
 import { formatNumber, formatUsd } from '../lib/format';
 import { ORDERBOOK_ABI, ORDERBOOK_ADDRESS, ORDERBOOK_READY } from '../contracts';
 import { useToast } from './Toast';
+import ConfirmDialog from './ConfirmDialog';
+import { useSettings } from '../lib/settings';
 
 export default function OpenOrders({ data }: { data: Order[] }) {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { addToast } = useToast();
+  const { settings } = useSettings();
   
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [confirmOrder, setConfirmOrder] = useState<Order | null>(null);
 
-  async function handleCancelOrder(order: Order) {
+  async function cancelOrderNow(order: Order) {
     if (!walletClient || !publicClient || !address || !ORDERBOOK_READY) return;
 
     setCancellingId(order.id);
@@ -49,6 +53,14 @@ export default function OpenOrders({ data }: { data: Order[] }) {
     } finally {
       setCancellingId(null);
     }
+  }
+
+  function handleCancelOrder(order: Order) {
+    if (!settings.showConfirmations) {
+      cancelOrderNow(order);
+      return;
+    }
+    setConfirmOrder(order);
   }
 
   const openOrders = data.filter(o => o.status === 'open');
@@ -130,6 +142,34 @@ export default function OpenOrders({ data }: { data: Order[] }) {
       {data.length === 0 && (
         <p className="muted small">No open orders yet.</p>
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(confirmOrder)}
+        title="Cancel order?"
+        message="This will submit an on-chain transaction to cancel your order."
+        confirmText="Cancel order"
+        cancelText="Back"
+        variant="warning"
+        details={
+          confirmOrder
+            ? [
+                { label: 'Order', value: `#${confirmOrder.id.slice(-6)}` },
+                { label: 'Type', value: confirmOrder.type.toUpperCase() },
+                { label: 'Side', value: confirmOrder.side.toUpperCase() },
+                { label: 'Size', value: formatNumber(confirmOrder.size, 4) },
+                { label: 'Trigger', value: confirmOrder.triggerPrice ? formatUsd(confirmOrder.triggerPrice, 2) : '--' },
+                { label: 'Reduce only', value: confirmOrder.reduceOnly ? 'Yes' : 'No' },
+              ]
+            : undefined
+        }
+        onCancel={() => setConfirmOrder(null)}
+        onConfirm={() => {
+          if (!confirmOrder) return;
+          const order = confirmOrder;
+          setConfirmOrder(null);
+          cancelOrderNow(order);
+        }}
+      />
     </div>
   );
 }

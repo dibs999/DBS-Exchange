@@ -1,13 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import { useAccount } from 'wagmi';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useAccount, useChainId } from 'wagmi';
 import { useMarketData } from './hooks/useMarketData';
-import { formatCompact, formatNumber, formatPct, formatUsd } from './lib/format';
+import { formatCompact, formatPct, formatUsd } from './lib/format';
 import MarketStrip from './components/MarketStrip';
 import TradingViewChart from './components/TradingViewChart';
 import OrderBook from './components/OrderBook';
 import Trades from './components/Trades';
 import Positions from './components/Positions';
-import PerpsCard from './components/PerpsCard';
 import OrderEntry from './components/OrderEntry';
 import OpenOrders from './components/OpenOrders';
 import WalletButton from './components/WalletButton';
@@ -17,8 +16,14 @@ import FaucetModal from './components/FaucetModal';
 import TradeHistory from './components/TradeHistory';
 import FundingChart from './components/FundingChart';
 import LPVault from './components/LPVault';
+import SettingsModal from './components/SettingsModal';
+import NetworkBanner from './components/NetworkBanner';
+import OnboardingModal from './components/OnboardingModal';
 import { ToastProvider } from './components/Toast';
+import { SettingsProvider } from './lib/settings';
+import { useI18n } from './lib/i18n';
 import { MARKET_ID_STRING } from './contracts';
+import { AccountPanelSkeleton, MarketStripSkeleton, OrderbookSkeleton, PositionsSkeleton } from './components/LoadingSkeleton';
 
 const featureCards = [
   {
@@ -39,9 +44,10 @@ const featureCards = [
 ];
 
 export default function App() {
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
+  const chainId = useChainId();
   const [activeMarketId, setActiveMarketId] = useState(MARKET_ID_STRING);
-  const { markets, activeMarket, orderbook, trades, positions, orders, prices, status } = useMarketData(
+  const { markets, activeMarket, orderbook, trades, positions, orders, prices, status, isLoadingSnapshot } = useMarketData(
     activeMarketId,
     address
   );
@@ -50,9 +56,46 @@ export default function App() {
   const [depositModalOpen, setDepositModalOpen] = useState(false);
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [faucetModalOpen, setFaucetModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [ticketPrefill, setTicketPrefill] = useState<{ price: number; side: 'bid' | 'ask'; key: number } | null>(null);
+  const { t } = useI18n();
+
+  // Check if onboarding should be shown
+  useEffect(() => {
+    const hasCompleted = localStorage.getItem('obsidian-onboarding-completed');
+    if (!hasCompleted && isConnected) {
+      setOnboardingOpen(true);
+    }
+  }, [isConnected]);
 
   // Tab states
   const [terminalTab, setTerminalTab] = useState<'positions' | 'orders' | 'history'>('positions');
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Don't trigger shortcuts when typing in inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'd':
+          if (isConnected) setDepositModalOpen(true);
+          break;
+        case 'w':
+          if (isConnected) setWithdrawModalOpen(true);
+          break;
+        case ',':
+          setSettingsOpen(true);
+          break;
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isConnected]);
 
   const heroStats = useMemo(() => {
     return [
@@ -82,7 +125,10 @@ export default function App() {
 
   return (
     <ToastProvider>
-      <div className="app">
+      <SettingsProvider>
+        <div className="app">
+        <NetworkBanner />
+        
         <header className="topbar">
           <div className="brand">
             <span className="brand-dot" />
@@ -92,13 +138,29 @@ export default function App() {
             </div>
           </div>
           <nav className="nav">
-            <a href="#terminal">Terminal</a>
-            <a href="#markets">Markets</a>
-            <a href="#liquidity">Liquidity</a>
-            <a href="#risk">Risk</a>
+            <a href="#terminal" aria-label={t('nav.terminal')}>{t('nav.terminal')}</a>
+            <a href="#markets" aria-label={t('nav.markets')}>{t('nav.markets')}</a>
+            <a href="#liquidity" aria-label={t('nav.liquidity')}>{t('nav.liquidity')}</a>
+            <a href="#risk" aria-label={t('nav.risk')}>{t('nav.risk')}</a>
           </nav>
           <div className="nav-actions">
-            <button className="btn ghost">Docs</button>
+            <button 
+              className="btn ghost" 
+              onClick={() => setSettingsOpen(true)} 
+              title={`${t('modal.settings.title')} (,)`}
+              aria-label={t('modal.settings.title')}
+            >
+              ⚙️
+            </button>
+            <button className="btn ghost" aria-label={t('nav.docs')}>{t('nav.docs')}</button>
+            <button 
+              className="btn ghost" 
+              onClick={() => setOnboardingOpen(true)}
+              title="Onboarding"
+              aria-label="Show onboarding"
+            >
+              ?
+            </button>
             <WalletButton />
           </div>
         </header>
@@ -165,7 +227,11 @@ export default function App() {
               </div>
               {status ? <p className="status warn">{status}</p> : null}
             </div>
-            <MarketStrip markets={markets} activeId={activeMarketId} onSelect={setActiveMarketId} />
+            {isLoadingSnapshot ? (
+              <MarketStripSkeleton />
+            ) : (
+              <MarketStrip markets={markets} activeId={activeMarketId} onSelect={setActiveMarketId} />
+            )}
           </section>
 
           <section className="section features" id="risk">
@@ -220,21 +286,39 @@ export default function App() {
                     </button>
                   </div>
                   
-                  {terminalTab === 'positions' && <Positions data={positions} />}
+                  {terminalTab === 'positions' &&
+                    (isLoadingSnapshot ? <PositionsSkeleton /> : <Positions data={positions} />)}
                   {terminalTab === 'orders' && <OpenOrders data={orders} />}
                   {terminalTab === 'history' && <TradeHistory />}
                 </div>
               </div>
 
               <div className="side-panels">
-                <AccountPanel 
-                  positions={positions}
-                  onDeposit={() => setDepositModalOpen(true)}
-                  onWithdraw={() => setWithdrawModalOpen(true)}
-                  onFaucet={() => setFaucetModalOpen(true)}
+                {isLoadingSnapshot ? (
+                  <AccountPanelSkeleton />
+                ) : (
+                  <AccountPanel 
+                    positions={positions}
+                    onDeposit={() => setDepositModalOpen(true)}
+                    onWithdraw={() => setWithdrawModalOpen(true)}
+                    onFaucet={() => setFaucetModalOpen(true)}
+                  />
+                )}
+                <OrderEntry
+                  marketId={activeMarket?.id ?? MARKET_ID_STRING}
+                  markPrice={activeMarket?.markPrice ?? 0}
+                  prefill={ticketPrefill}
                 />
-                <OrderEntry marketId={activeMarket?.id ?? MARKET_ID_STRING} markPrice={activeMarket?.markPrice ?? 0} />
-                <OrderBook data={orderbook} />
+                {isLoadingSnapshot ? (
+                  <OrderbookSkeleton />
+                ) : (
+                  <OrderBook
+                    data={orderbook}
+                    onPriceClick={(price, side) => {
+                      setTicketPrefill({ price, side, key: Date.now() });
+                    }}
+                  />
+                )}
                 <Trades data={trades} />
               </div>
             </div>
@@ -268,7 +352,7 @@ export default function App() {
               <div className="liquidity-grid">
                 <div>
                   <p className="label">Collateral vault</p>
-                  <strong>{formatNumber(8.4, 1)}M oUSD</strong>
+                  <strong>8.4M oUSD</strong>
                   <p className="muted small">Allocated to liquidity buffers.</p>
                 </div>
                 <div>
@@ -288,6 +372,24 @@ export default function App() {
           </section>
         </main>
 
+        <footer className="footer">
+          <div className="footer-brand">
+            <span className="brand-dot" />
+            <span>Obsidian Drift</span>
+          </div>
+          <div className="footer-links">
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://docs.example.com" target="_blank" rel="noopener noreferrer">Docs</a>
+            <a href="https://discord.gg" target="_blank" rel="noopener noreferrer">Discord</a>
+            <a href="https://twitter.com" target="_blank" rel="noopener noreferrer">Twitter</a>
+          </div>
+          <div className="footer-info">
+            <span className="muted small">Sepolia Testnet</span>
+            <span className="muted small">•</span>
+            <span className="muted small">v0.1.0-beta</span>
+          </div>
+        </footer>
+
         {/* Modals */}
         <DepositWithdrawModal 
           mode="deposit" 
@@ -303,7 +405,17 @@ export default function App() {
           isOpen={faucetModalOpen} 
           onClose={() => setFaucetModalOpen(false)} 
         />
-      </div>
+        <SettingsModal
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
+        <OnboardingModal
+          isOpen={onboardingOpen}
+          onClose={() => setOnboardingOpen(false)}
+          onComplete={() => setOnboardingOpen(false)}
+        />
+        </div>
+      </SettingsProvider>
     </ToastProvider>
   );
 }

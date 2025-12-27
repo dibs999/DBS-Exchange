@@ -63,6 +63,8 @@ export function useMarketData(activeMarketId: string, address?: string) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [prices, setPrices] = useState<PriceFeed>(fallbackPrices);
   const [status, setStatus] = useState<string | null>(null);
+  const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(true);
+  const [isWsConnected, setIsWsConnected] = useState(false);
 
   const activeMarket = useMemo(
     () => markets.find((market) => market.id === activeMarketId) ?? markets[0],
@@ -72,6 +74,7 @@ export function useMarketData(activeMarketId: string, address?: string) {
   useEffect(() => {
     let mounted = true;
     async function loadSnapshot() {
+      setIsLoadingSnapshot(true);
       try {
         const [marketsRes, pricesRes, orderbookRes, tradesRes] = await Promise.all([
           fetch(`${API_URL}/markets`),
@@ -87,6 +90,8 @@ export function useMarketData(activeMarketId: string, address?: string) {
         setStatus(null);
       } catch (err) {
         setStatus('Backend offline. Using local fallback data.');
+      } finally {
+        if (mounted) setIsLoadingSnapshot(false);
       }
     }
     loadSnapshot();
@@ -124,6 +129,9 @@ export function useMarketData(activeMarketId: string, address?: string) {
 
   useEffect(() => {
     const ws = new WebSocket(getWsUrl());
+    ws.onopen = () => {
+      setIsWsConnected(true);
+    };
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data) as WsMessage;
       if (message.type === 'markets') {
@@ -146,7 +154,11 @@ export function useMarketData(activeMarketId: string, address?: string) {
       }
     };
     ws.onerror = () => {
+      setIsWsConnected(false);
       setStatus('Live socket unavailable. Showing cached data.');
+    };
+    ws.onclose = () => {
+      setIsWsConnected(false);
     };
     return () => {
       ws.close();
@@ -162,5 +174,7 @@ export function useMarketData(activeMarketId: string, address?: string) {
     orders,
     prices,
     status,
+    isLoadingSnapshot,
+    isWsConnected,
   };
 }

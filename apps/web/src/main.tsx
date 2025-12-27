@@ -5,6 +5,8 @@ import { WagmiConfig, configureChains, createConfig } from 'wagmi';
 import { sepolia } from 'wagmi/chains';
 import { injected, walletConnect } from 'wagmi/connectors';
 import { publicProvider } from 'wagmi/providers/public';
+import { I18nProvider } from './lib/i18n';
+import { SkipToMain } from './components/Accessibility';
 import App from './App';
 import './App.css';
 
@@ -29,7 +31,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <WagmiConfig config={wagmiConfig}>
-        <App />
+        <I18nProvider>
+          <SkipToMain />
+          <App />
+        </I18nProvider>
       </WagmiConfig>
     </QueryClientProvider>
   </React.StrictMode>

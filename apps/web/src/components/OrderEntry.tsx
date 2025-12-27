@@ -4,10 +4,13 @@ import { parseUnits, stringToHex } from 'viem';
 import { ENGINE_ABI, ENGINE_ADDRESS, ENGINE_READY, MARKET_ID_STRING, ORDERBOOK_ABI, ORDERBOOK_ADDRESS, ORDERBOOK_READY } from '../contracts';
 import { formatUsd } from '../lib/format';
 import { useToast } from './Toast';
+import ConfirmDialog from './ConfirmDialog';
+import { useSettings } from '../lib/settings';
 
 export type OrderEntryProps = {
   marketId: string;
   markPrice: number;
+  prefill?: { price: number; side: 'bid' | 'ask'; key: number } | null;
 };
 
 const orderTypes = [
@@ -20,12 +23,13 @@ type OrderType = (typeof orderTypes)[number]['id'];
 
 type Side = 'long' | 'short';
 
-export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
+export default function OrderEntry({ marketId, markPrice, prefill }: OrderEntryProps) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { addToast } = useToast();
+  const { settings } = useSettings();
 
   const [orderType, setOrderType] = useState<OrderType>('market');
   const [side, setSide] = useState<Side>('long');
@@ -35,6 +39,15 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
   const [reduceOnly, setReduceOnly] = useState(false);
   const [operatorApproved, setOperatorApproved] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Prefill from orderbook clicks (limit ticket UX)
+  useEffect(() => {
+    if (!prefill) return;
+    setTrigger(prefill.price.toFixed(2));
+    setSide(prefill.side === 'bid' ? 'long' : 'short');
+    setOrderType((prev) => (prev === 'market' ? 'limit' : prev));
+  }, [prefill?.key]);
 
   const marketIdHex = useMemo(() => stringToHex(marketId || MARKET_ID_STRING, { size: 32 }), [marketId]);
   const requiresTrigger = orderType !== 'market';
@@ -50,6 +63,56 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
     const leverageNum = Number(leverage) || 1;
     return estimatedNotional / leverageNum;
   }, [estimatedNotional, leverage]);
+
+  // Calculate price impact (simplified simulation)
+  const priceImpact = useMemo(() => {
+    const sizeNum = Number(size) || 0;
+    if (sizeNum === 0) return 0;
+    // Simplified price impact: larger orders have more impact
+    // In a real implementation, this would use orderbook depth
+    const impactBps = Math.min(sizeNum * 5, 100); // 0.05% per ETH, max 1%
+    return impactBps / 100;
+  }, [size]);
+
+  const priceImpactWarning = priceImpact > 0.5; // Warn if > 0.5%
+
+  function validateBeforeSubmit(): boolean {
+    if (!walletClient || !publicClient || !address) return false;
+    if (chainId !== 11155111) {
+      addToast({ type: 'warning', title: 'Wrong network', message: 'Please switch to Sepolia before trading.' });
+      return false;
+    }
+    if (!ENGINE_READY) {
+      addToast({ type: 'error', title: 'Error', message: 'Engine not configured.' });
+      return false;
+    }
+    if (!size || Number(size) <= 0) {
+      addToast({ type: 'warning', title: 'Invalid input', message: 'Enter a valid size.' });
+      return false;
+    }
+    const leverageValue = Number(leverage);
+    if (!Number.isFinite(leverageValue) || leverageValue <= 0 || !Number.isInteger(leverageValue)) {
+      addToast({ type: 'warning', title: 'Invalid input', message: 'Leverage must be a positive integer.' });
+      return false;
+    }
+    if (requiresTrigger && (!trigger || Number(trigger) <= 0)) {
+      addToast({ type: 'warning', title: 'Invalid input', message: 'Enter a trigger price.' });
+      return false;
+    }
+
+    // Safety guard (MVP heuristic)
+    if (orderType === 'market' && settings.slippageTolerancePct > 0 && priceImpact > settings.slippageTolerancePct) {
+      addToast({
+        type: 'warning',
+        title: 'Safety guard',
+        message: `Estimated impact (~${priceImpact.toFixed(2)}%) exceeds your tolerance (${settings.slippageTolerancePct.toFixed(
+          2
+        )}%). Reduce size or increase tolerance.`,
+      });
+      return false;
+    }
+    return true;
+  }
 
   useEffect(() => {
     async function loadOperator() {
@@ -74,6 +137,10 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
 
   async function approveOperator() {
     if (!walletClient || !publicClient || !address) return;
+    if (chainId !== 11155111) {
+      addToast({ type: 'warning', title: 'Wrong network', message: 'Please switch to Sepolia.' });
+      return;
+    }
     if (!ORDERBOOK_READY) {
       addToast({ type: 'error', title: 'Error', message: 'Order router not configured.' });
       return;
@@ -113,28 +180,12 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
   }
 
   async function submitOrder() {
+    if (!validateBeforeSubmit()) return;
     if (!walletClient || !publicClient || !address) return;
-    if (!ENGINE_READY) {
-      addToast({ type: 'error', title: 'Error', message: 'Engine not configured.' });
-      return;
-    }
-    if (!size || Number(size) <= 0) {
-      addToast({ type: 'warning', title: 'Invalid input', message: 'Enter a valid size.' });
-      return;
-    }
-    const leverageValue = Number(leverage);
-    if (!Number.isFinite(leverageValue) || leverageValue <= 0 || !Number.isInteger(leverageValue)) {
-      addToast({ type: 'warning', title: 'Invalid input', message: 'Leverage must be a positive integer.' });
-      return;
-    }
-
-    if (requiresTrigger && (!trigger || Number(trigger) <= 0)) {
-      addToast({ type: 'warning', title: 'Invalid input', message: 'Enter a trigger price.' });
-      return;
-    }
 
     setLoading(true);
     try {
+      const leverageValue = Number(leverage);
       const sizeUnits = parseUnits(size, 18);
       const signedSize = side === 'short' ? -sizeUnits : sizeUnits;
 
@@ -205,6 +256,49 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
       setLoading(false);
     }
   }
+
+  function handleSubmitClick() {
+    if (!validateBeforeSubmit()) return;
+    if (!settings.showConfirmations) {
+      submitOrder();
+      return;
+    }
+    setConfirmOpen(true);
+  }
+
+  const confirmDetails = useMemo(() => {
+    const leverageValue = Number(leverage);
+    const details: { label: string; value: string }[] = [
+      { label: 'Market', value: marketId },
+      { label: 'Type', value: orderType.toUpperCase() },
+      { label: 'Side', value: side.toUpperCase() },
+      { label: 'Size', value: `${size || '0'} ETH` },
+      { label: 'Leverage', value: `${Number.isFinite(leverageValue) ? leverageValue : '--'}x` },
+      { label: 'Est. Notional', value: formatUsd(estimatedNotional, 2) },
+      { label: 'Est. Margin', value: formatUsd(estimatedMargin, 2) },
+      { label: 'Est. Liq', value: formatUsd(markPrice * (side === 'long' ? 0.86 : 1.14), 2) },
+      { label: 'Impact (est.)', value: `~${priceImpact.toFixed(2)}%` },
+      { label: 'Tolerance', value: `${settings.slippageTolerancePct.toFixed(2)}%` },
+    ];
+    if (orderType !== 'market') {
+      details.splice(3, 0, { label: 'Trigger', value: trigger ? formatUsd(Number(trigger), 2) : '--' });
+      if (reduceOnly) details.splice(5, 0, { label: 'Reduce only', value: 'Yes' });
+    }
+    return details;
+  }, [
+    estimatedMargin,
+    estimatedNotional,
+    leverage,
+    marketId,
+    markPrice,
+    orderType,
+    priceImpact,
+    reduceOnly,
+    settings.slippageTolerancePct,
+    side,
+    size,
+    trigger,
+  ]);
 
   return (
     <div className="panel order-entry-panel">
@@ -281,6 +375,17 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
               {formatUsd(markPrice * (side === 'long' ? 0.86 : 1.14), 2)}
             </span>
           </div>
+          <div className="preview-row">
+            <span className="label">Price Impact</span>
+            <span className={priceImpactWarning ? 'text-negative' : 'text-positive'}>
+              ~{priceImpact.toFixed(2)}%
+            </span>
+          </div>
+          {priceImpactWarning && (
+            <div className="price-impact-warning">
+              ⚠️ High price impact. Consider reducing order size.
+            </div>
+          )}
         </div>
       )}
 
@@ -307,11 +412,26 @@ export default function OrderEntry({ marketId, markPrice }: OrderEntryProps) {
 
       <button 
         className={`btn ${side === 'long' ? 'btn-long' : 'btn-short'}`} 
-        onClick={submitOrder} 
-        disabled={!isConnected || (orderType !== 'market' && !ORDERBOOK_READY) || loading}
+        onClick={handleSubmitClick} 
+        disabled={!isConnected || chainId !== 11155111 || (orderType !== 'market' && !ORDERBOOK_READY) || loading}
       >
         {loading ? 'Processing...' : `${side === 'long' ? 'Long' : 'Short'} ${marketId}`}
       </button>
+
+      <ConfirmDialog
+        isOpen={confirmOpen}
+        title="Confirm transaction"
+        message="Please confirm the order details below. This will submit an on-chain transaction."
+        confirmText="Submit order"
+        cancelText="Cancel"
+        variant={priceImpactWarning ? 'warning' : 'info'}
+        details={confirmDetails}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          submitOrder();
+        }}
+      />
     </div>
   );
 }

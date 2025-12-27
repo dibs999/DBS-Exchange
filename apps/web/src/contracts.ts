@@ -4,6 +4,7 @@ export const ENGINE_ADDRESS = (import.meta.env.VITE_ENGINE_ADDRESS || '') as `0x
 export const COLLATERAL_ADDRESS = (import.meta.env.VITE_COLLATERAL_ADDRESS || '') as `0x${string}`;
 export const ORACLE_ADDRESS = (import.meta.env.VITE_ORACLE_ADDRESS || '') as `0x${string}`;
 export const ORDERBOOK_ADDRESS = (import.meta.env.VITE_ORDERBOOK_ADDRESS || '') as `0x${string}`;
+export const FAUCET_ADDRESS = (import.meta.env.VITE_FAUCET_ADDRESS || '') as `0x${string}`;
 export const MARKET_ID_STRING = (import.meta.env.VITE_MARKET_ID || 'ETH-USD') as string;
 
 export const MARKET_ID = stringToHex(MARKET_ID_STRING, { size: 32 });

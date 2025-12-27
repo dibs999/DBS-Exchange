@@ -19,6 +19,12 @@ async function main() {
   const Orderbook = await ethers.deployContract("Orderbook", [Engine.target]);
   await Orderbook.waitForDeployment();
 
+  const Faucet = await ethers.deployContract("Faucet", [Collateral.target]);
+  await Faucet.waitForDeployment();
+
+  // Fund faucet with tokens
+  await (await Collateral.mint(Faucet.target, ethers.parseUnits("1000000", 18))).wait();
+
   await (await Engine.createMarket(MARKET_ID, 1000, 500, 15)).wait();
   await (await Oracle.setPrice(MARKET_ID, ethers.parseUnits("3200", 18))).wait();
   await (await Collateral.mint(deployer.address, ethers.parseUnits("100000", 18))).wait();
@@ -29,6 +35,7 @@ async function main() {
     oracle: Oracle.target,
     perpEngine: Engine.target,
     orderbook: Orderbook.target,
+    faucet: Faucet.target,
     marketId: MARKET_ID,
     deployer: deployer.address,
   };

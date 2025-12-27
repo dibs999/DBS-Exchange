@@ -7,6 +7,8 @@ import { ENGINE_ABI, ORDERBOOK_ABI, ORACLE_ABI } from './abi';
 import { env } from './config';
 import { appendTrade, bumpMarket, getOrders, seedMarkets, state, updateOrderStatus, updateOrderbook, updatePrices, upsertOrder } from './store';
 import { Market, Order, Orderbook, Position, PriceFeed, Trade, WsMessage } from '@dbs/shared';
+import { initDb, getPool, closeDb } from './db/index.js';
+import { startIndexer } from './indexer.js';
 
 type PositionState = {
   marketId: string;
@@ -26,8 +28,58 @@ seedMarkets(env.marketId);
 
 const app = fastify({ logger: true });
 
-await app.register(cors, { origin: true });
+await app.register(cors, {
+  origin: env.corsOrigins.length > 0 ? env.corsOrigins : true,
+  methods: ['GET', 'OPTIONS'],
+});
 await app.register(websocket);
+
+// --- Basic hardening (MVP) ---
+// Security headers (use @fastify/helmet in production)
+app.addHook('onSend', async (_request, reply, payload) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('Referrer-Policy', 'no-referrer');
+  reply.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  reply.header('Cross-Origin-Resource-Policy', 'same-site');
+  return payload;
+});
+
+// Very small in-memory rate limit (per-IP) to protect demo endpoints
+type RateEntry = { count: number; resetAt: number };
+const RATE_WINDOW_MS = 60_000;
+const rateMap = new Map<string, RateEntry>();
+
+function getClientIp(request: any): string {
+  const xfwd = request.headers?.['x-forwarded-for'];
+  if (typeof xfwd === 'string' && xfwd.length > 0) return xfwd.split(',')[0]!.trim();
+  return request.ip || request.socket?.remoteAddress || 'unknown';
+}
+
+app.addHook('onRequest', async (request, reply) => {
+  // Do not rate limit WS upgrade path (still protected by infra in real deployment).
+  if (typeof request.url === 'string' && request.url.startsWith('/ws')) return;
+
+  const ip = getClientIp(request);
+  const now = Date.now();
+  const entry = rateMap.get(ip) ?? { count: 0, resetAt: now + RATE_WINDOW_MS };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + RATE_WINDOW_MS;
+  }
+  entry.count += 1;
+  rateMap.set(ip, entry);
+
+  const limit = env.rateLimitPerMinute;
+  reply.header('X-RateLimit-Limit', String(limit));
+  reply.header('X-RateLimit-Remaining', String(Math.max(0, limit - entry.count)));
+  reply.header('X-RateLimit-Reset', String(Math.ceil(entry.resetAt / 1000)));
+
+  if (entry.count > limit) {
+    reply.code(429).send({ ok: false, error: 'rate_limited', message: 'Too many requests. Please slow down.' });
+    return;
+  }
+});
 
 function broadcast(message: WsMessage) {
   const payload = JSON.stringify(message);
@@ -120,6 +172,80 @@ app.get('/orders', async (request) => {
   return getOrders(address);
 });
 
+// History endpoints
+app.get('/history/:address', async (request) => {
+  const { address } = request.params as { address: string };
+  if (!isAddress(address)) {
+    return { trades: [], positions: [] };
+  }
+
+  const pool = getPool();
+  try {
+    const [tradesRes, positionsRes] = await Promise.all([
+      pool.query(
+        `SELECT market_id, side, size, price, pnl, fee, created_at, tx_hash
+         FROM trades WHERE address = $1 ORDER BY created_at DESC LIMIT 100`,
+        [address.toLowerCase()]
+      ),
+      pool.query(
+        `SELECT market_id, side, size, entry_price, exit_price, margin, pnl, leverage, opened_at, closed_at
+         FROM positions_history WHERE address = $1 AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 50`,
+        [address.toLowerCase()]
+      ),
+    ]);
+
+    return {
+      trades: tradesRes.rows.map((row: any) => ({
+        id: row.tx_hash,
+        marketId: row.market_id,
+        side: row.side,
+        size: Number(row.size),
+        price: Number(row.price),
+        pnl: row.pnl ? Number(row.pnl) : null,
+        fee: row.fee ? Number(row.fee) : null,
+        closedAt: row.created_at.toISOString(),
+      })),
+      positions: positionsRes.rows.map((row: any) => ({
+        id: `${row.market_id}-${row.opened_at}`,
+        marketId: row.market_id,
+        side: row.side,
+        size: Number(row.size),
+        entryPrice: Number(row.entry_price),
+        exitPrice: Number(row.exit_price),
+        pnl: Number(row.pnl),
+        margin: Number(row.margin),
+        leverage: row.leverage,
+        closedAt: row.closed_at.toISOString(),
+      })),
+    };
+  } catch (err) {
+    console.error('History query failed:', err);
+    return { trades: [], positions: [] };
+  }
+});
+
+app.get('/funding/:marketId', async (request) => {
+  const { marketId } = request.params as { marketId: string };
+  const pool = getPool();
+  
+  try {
+    const result = await pool.query(
+      `SELECT rate, cumulative_rate, created_at
+       FROM funding_history WHERE market_id = $1 ORDER BY created_at DESC LIMIT 100`,
+      [marketId]
+    );
+    
+    return result.rows.map((row: any) => ({
+      time: row.created_at.toISOString(),
+      rate: Number(row.rate),
+      cumulativeRate: Number(row.cumulative_rate),
+    }));
+  } catch (err) {
+    console.error('Funding history query failed:', err);
+    return [];
+  }
+});
+
 app.get('/ws', { websocket: true }, (connection) => {
   const client = {
     send: (data: string) => connection.socket.send(data),
@@ -139,7 +265,10 @@ app.get('/ws', { websocket: true }, (connection) => {
 
 async function fetchPrices() {
   try {
-    const response = await fetch(env.priceFeedUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.priceFeedTimeoutMs);
+    const response = await fetch(env.priceFeedUrl, { signal: controller.signal });
+    clearTimeout(timeout);
     if (!response.ok) return;
     const data = (await response.json()) as PriceFeed;
     if (!data?.ethereum?.usd) return;
@@ -371,10 +500,28 @@ async function startOracleKeeper() {
   }, 45_000);
 }
 
+// Initialize database and indexer
+try {
+  await initDb();
+  // Start indexer in background (non-blocking)
+  startIndexer().catch((err) => {
+    console.error('Indexer error:', err);
+  });
+} catch (err) {
+  console.warn('Database/indexer initialization failed:', err);
+}
+
 setInterval(fetchPrices, 30_000);
 setInterval(tickMarkets, 3_000);
 
 await startEventWatchers();
 await startOracleKeeper();
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  await closeDb();
+  await app.close();
+  process.exit(0);
+});
 
 await app.listen({ port: env.port, host: '0.0.0.0' });

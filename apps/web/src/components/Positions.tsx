@@ -5,6 +5,8 @@ import { Position } from '@dbs/shared';
 import { formatNumber, formatUsd } from '../lib/format';
 import { ENGINE_ABI, ENGINE_ADDRESS, ENGINE_READY } from '../contracts';
 import { useToast } from './Toast';
+import ConfirmDialog from './ConfirmDialog';
+import { useSettings } from '../lib/settings';
 
 type PositionsProps = {
   data: Position[];
@@ -15,11 +17,13 @@ export default function Positions({ data }: PositionsProps) {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { addToast } = useToast();
+  const { settings } = useSettings();
   
   const [closingId, setClosingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmPos, setConfirmPos] = useState<Position | null>(null);
 
-  async function handleClosePosition(position: Position) {
+  async function closePositionNow(position: Position) {
     if (!walletClient || !publicClient || !address || !ENGINE_READY) return;
 
     setClosingId(position.id);
@@ -57,6 +61,14 @@ export default function Positions({ data }: PositionsProps) {
     } finally {
       setClosingId(null);
     }
+  }
+
+  function handleClosePosition(position: Position) {
+    if (!settings.showConfirmations) {
+      closePositionNow(position);
+      return;
+    }
+    setConfirmPos(position);
   }
 
   return (
@@ -166,6 +178,34 @@ export default function Positions({ data }: PositionsProps) {
           </div>
         ))
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(confirmPos)}
+        title="Close position?"
+        message="This will submit an on-chain transaction to close your position."
+        confirmText="Close"
+        cancelText="Cancel"
+        variant="danger"
+        details={
+          confirmPos
+            ? [
+                { label: 'Market', value: confirmPos.marketId },
+                { label: 'Side', value: confirmPos.side.toUpperCase() },
+                { label: 'Size', value: `${formatNumber(confirmPos.size, 4)} ETH` },
+                { label: 'Entry', value: formatUsd(confirmPos.entryPrice, 2) },
+                { label: 'Mark', value: formatUsd(confirmPos.markPrice, 2) },
+                { label: 'Unrealized P&L', value: formatUsd(confirmPos.pnl, 2) },
+              ]
+            : undefined
+        }
+        onCancel={() => setConfirmPos(null)}
+        onConfirm={() => {
+          if (!confirmPos) return;
+          const pos = confirmPos;
+          setConfirmPos(null);
+          closePositionNow(pos);
+        }}
+      />
     </div>
   );
 }

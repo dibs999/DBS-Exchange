@@ -10,6 +10,14 @@ function parseNumber(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseCsv(value: string | undefined) {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export const env = {
   port: parseNumber(process.env.API_PORT, 3001),
   rpcUrl: process.env.SEPOLIA_RPC_URL || process.env.RPC_URL || '',
@@ -21,4 +29,7 @@ export const env = {
   keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY || '',
   priceFeedUrl: process.env.PRICE_FEED_URL || DEFAULT_PRICE_FEED,
   marketId: process.env.MARKET_ID || 'ETH-USD',
+  corsOrigins: parseCsv(process.env.CORS_ORIGINS),
+  rateLimitPerMinute: parseNumber(process.env.RATE_LIMIT_PER_MINUTE, 240),
+  priceFeedTimeoutMs: parseNumber(process.env.PRICE_FEED_TIMEOUT_MS, 6_000),
 };

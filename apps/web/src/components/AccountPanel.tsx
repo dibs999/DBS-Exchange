@@ -60,16 +60,21 @@ export default function AccountPanel({ positions, onDeposit, onWithdraw, onFauce
   }, [publicClient, address]);
 
   // Calculate margin stats
-  const totalMarginUsed = positions.reduce((sum, p) => sum + p.margin, 0);
+  // NOTE: In the PerpEngine contract, `collateralBalance` is "free collateral".
+  // Margin locked inside positions is stored separately in each Position struct.
+  const totalMarginLocked = positions.reduce((sum, p) => sum + p.margin, 0);
   const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
-  const equity = engineBalance + totalUnrealizedPnl;
-  const availableMargin = Math.max(0, equity - totalMarginUsed);
-  const marginRatio = equity > 0 ? (totalMarginUsed / equity) * 100 : 0;
+  const totalEngineCollateral = engineBalance + totalMarginLocked;
+  const equity = totalEngineCollateral + totalUnrealizedPnl;
+  // Available collateral for NEW positions (per current contract logic) is the free collateral only.
+  const availableCollateral = Math.max(0, engineBalance);
+  // Simple utilization metric (not a liquidation health metric).
+  const utilization = totalEngineCollateral > 0 ? (totalMarginLocked / totalEngineCollateral) * 100 : 0;
 
   // Health color
   const getHealthColor = () => {
-    if (marginRatio < 50) return 'var(--emerald)';
-    if (marginRatio < 75) return 'var(--gold)';
+    if (utilization < 50) return 'var(--emerald)';
+    if (utilization < 75) return 'var(--gold)';
     return 'var(--crimson)';
   };
 
@@ -95,7 +100,7 @@ export default function AccountPanel({ positions, onDeposit, onWithdraw, onFauce
           <h3>{formatUsd(equity, 2)}</h3>
         </div>
         <div className="health-badge" style={{ '--health-color': getHealthColor() } as React.CSSProperties}>
-          {marginRatio < 50 ? 'Healthy' : marginRatio < 75 ? 'Moderate' : 'At Risk'}
+          {utilization < 50 ? 'Healthy' : utilization < 75 ? 'Moderate' : 'At Risk'}
         </div>
       </div>
 
@@ -105,8 +110,16 @@ export default function AccountPanel({ positions, onDeposit, onWithdraw, onFauce
           <span>{loading ? '...' : `${formatNumber(walletBalance, 2)} oUSD`}</span>
         </div>
         <div className="stat-row">
-          <span className="label">Engine Balance</span>
+          <span className="label">Engine (Free)</span>
           <span>{loading ? '...' : `${formatNumber(engineBalance, 2)} oUSD`}</span>
+        </div>
+        <div className="stat-row">
+          <span className="label">Margin Locked</span>
+          <span>{formatUsd(totalMarginLocked, 2)}</span>
+        </div>
+        <div className="stat-row">
+          <span className="label">Engine (Total)</span>
+          <span>{formatUsd(totalEngineCollateral, 2)}</span>
         </div>
         <div className="stat-row">
           <span className="label">Unrealized P&L</span>
@@ -115,21 +128,20 @@ export default function AccountPanel({ positions, onDeposit, onWithdraw, onFauce
           </span>
         </div>
         <div className="stat-row">
-          <span className="label">Margin Used</span>
-          <span>{formatUsd(totalMarginUsed, 2)}</span>
+          <span className="label">Available (Free)</span>
+          <span>{formatUsd(availableCollateral, 2)}</span>
         </div>
         <div className="stat-row">
-          <span className="label">Available Margin</span>
-          <span>{formatUsd(availableMargin, 2)}</span>
-        </div>
-        <div className="stat-row">
-          <span className="label">Margin Ratio</span>
-          <span style={{ color: getHealthColor() }}>{formatNumber(marginRatio, 1)}%</span>
+          <span className="label">Utilization</span>
+          <span style={{ color: getHealthColor() }}>{formatNumber(utilization, 1)}%</span>
         </div>
       </div>
 
       <div className="margin-bar">
-        <div className="margin-bar-fill" style={{ width: `${Math.min(marginRatio, 100)}%`, background: getHealthColor() }} />
+        <div
+          className="margin-bar-fill"
+          style={{ width: `${Math.min(utilization, 100)}%`, background: getHealthColor() }}
+        />
       </div>
 
       <div className="account-actions">
