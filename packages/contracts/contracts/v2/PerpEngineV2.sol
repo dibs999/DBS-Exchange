@@ -18,6 +18,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
     uint256 public constant BPS = 10_000;
     uint256 public constant ONE = 1e18;
     uint256 public constant SCALE = 1e12; // USDC (6) -> 1e18 internal
+    uint256 public constant SECONDS_PER_HOUR = 3600;
 
     struct Market {
         bool active;
@@ -26,7 +27,10 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         uint256 maxLeverage;
         uint256 maxOpenInterest;
         uint256 maxAccountExposure;
+        uint256 maxFundingRateBps; // per hour
         uint256 openInterest;
+        uint256 longSize;
+        uint256 shortSize;
         int256 cumulativeFundingRate;
         int256 fundingRatePerSecond;
         uint256 lastFundingTime;
@@ -66,15 +70,26 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
     mapping(bytes32 => Market) public markets;
     mapping(address => mapping(bytes32 => Position)) public positions;
     mapping(address => uint256) public collateralBalance; // 1e18 internal
+    mapping(address => bool) public fundingKeepers;
+    mapping(address => bool) public adlKeepers;
 
     mapping(address => bytes32[]) private accountMarkets;
     mapping(address => mapping(bytes32 => uint256)) private accountMarketIndex; // 1-based
 
     event Deposit(address indexed account, uint256 amount, uint256 amountInternal);
     event Withdraw(address indexed account, uint256 amount, uint256 amountInternal);
-    event MarketCreated(bytes32 indexed marketId, uint256 initialMarginBps, uint256 maintenanceMarginBps, uint256 maxLeverage);
+    event MarketCreated(
+        bytes32 indexed marketId,
+        uint256 initialMarginBps,
+        uint256 maintenanceMarginBps,
+        uint256 maxLeverage,
+        uint256 maxFundingRateBps
+    );
     event MarketUpdated(bytes32 indexed marketId);
     event FundingRateUpdated(bytes32 indexed marketId, int256 ratePerSecond, int256 cumulativeFundingRate);
+    event FundingKeeperSet(address indexed keeper, bool allowed);
+    event AdlKeeperSet(address indexed keeper, bool allowed);
+    event FundingConfigUpdated(bytes32 indexed marketId, uint256 maxFundingRateBps);
     event PositionOpened(address indexed account, bytes32 indexed marketId, int256 size, uint256 entryPrice);
     event PositionUpdated(address indexed account, bytes32 indexed marketId, int256 size, uint256 entryPrice, int256 realizedPnl);
     event PositionClosed(address indexed account, bytes32 indexed marketId, int256 size, uint256 exitPrice, int256 pnl);
@@ -105,9 +120,21 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
     error StalePrice();
     error NotLiquidatable();
     error AdlDisabled();
+    error NotFundingKeeper();
+    error NotAdlKeeper();
 
     modifier onlyOrderbook() {
         if (msg.sender != orderbook) revert NotOrderbook();
+        _;
+    }
+
+    modifier onlyFundingKeeper() {
+        if (!fundingKeepers[msg.sender] && msg.sender != owner()) revert NotFundingKeeper();
+        _;
+    }
+
+    modifier onlyAdlKeeper() {
+        if (!adlKeepers[msg.sender] && msg.sender != owner()) revert NotAdlKeeper();
         _;
     }
 
@@ -183,6 +210,16 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         emit AdlToggled(enabled);
     }
 
+    function setFundingKeeper(address keeper, bool allowed) external onlyOwner {
+        fundingKeepers[keeper] = allowed;
+        emit FundingKeeperSet(keeper, allowed);
+    }
+
+    function setAdlKeeper(address keeper, bool allowed) external onlyOwner {
+        adlKeepers[keeper] = allowed;
+        emit AdlKeeperSet(keeper, allowed);
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -197,7 +234,8 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         uint256 maintenanceMarginBps,
         uint256 maxLeverage,
         uint256 maxOpenInterest,
-        uint256 maxAccountExposure
+        uint256 maxAccountExposure,
+        uint256 maxFundingRateBps
     ) external onlyOwner {
         require(!markets[marketId].active, "Market exists");
         require(initialMarginBps > 0 && initialMarginBps < BPS, "Bad initial");
@@ -211,12 +249,15 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
             maxLeverage: maxLeverage,
             maxOpenInterest: maxOpenInterest,
             maxAccountExposure: maxAccountExposure,
+            maxFundingRateBps: maxFundingRateBps,
             openInterest: 0,
+            longSize: 0,
+            shortSize: 0,
             cumulativeFundingRate: 0,
             fundingRatePerSecond: 0,
             lastFundingTime: block.timestamp
         });
-        emit MarketCreated(marketId, initialMarginBps, maintenanceMarginBps, maxLeverage);
+        emit MarketCreated(marketId, initialMarginBps, maintenanceMarginBps, maxLeverage, maxFundingRateBps);
     }
 
     function updateMarket(
@@ -226,6 +267,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         uint256 maxLeverage,
         uint256 maxOpenInterest,
         uint256 maxAccountExposure,
+        uint256 maxFundingRateBps,
         bool active
     ) external onlyOwner {
         Market storage market = markets[marketId];
@@ -236,7 +278,9 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         market.maxLeverage = maxLeverage;
         market.maxOpenInterest = maxOpenInterest;
         market.maxAccountExposure = maxAccountExposure;
+        market.maxFundingRateBps = maxFundingRateBps;
         emit MarketUpdated(marketId);
+        emit FundingConfigUpdated(marketId, maxFundingRateBps);
     }
 
     function setFundingRate(bytes32 marketId, int256 ratePerSecond) external onlyOwner {
@@ -245,6 +289,31 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         _updateFunding(marketId);
         market.fundingRatePerSecond = ratePerSecond;
         emit FundingRateUpdated(marketId, ratePerSecond, market.cumulativeFundingRate);
+    }
+
+    function updateFundingRate(bytes32 marketId) external onlyFundingKeeper {
+        Market storage market = markets[marketId];
+        if (!market.active) revert MarketInactive();
+        _updateFunding(marketId);
+
+        uint256 price = _getPrice(marketId);
+        uint256 longNotional = (market.longSize * price) / ONE;
+        uint256 shortNotional = (market.shortSize * price) / ONE;
+        uint256 total = longNotional + shortNotional;
+        if (total == 0 || market.maxFundingRateBps == 0) {
+            market.fundingRatePerSecond = 0;
+            emit FundingRateUpdated(marketId, 0, market.cumulativeFundingRate);
+            return;
+        }
+
+        int256 imbalance = (int256(longNotional) - int256(shortNotional)) * int256(ONE) / int256(total);
+        int256 maxRate = int256((market.maxFundingRateBps * ONE) / BPS / SECONDS_PER_HOUR);
+        int256 rate = (imbalance * maxRate) / int256(ONE);
+        if (rate > maxRate) rate = maxRate;
+        if (rate < -maxRate) rate = -maxRate;
+
+        market.fundingRatePerSecond = rate;
+        emit FundingRateUpdated(marketId, rate, market.cumulativeFundingRate);
     }
 
     function deposit(uint256 amount) external nonReentrant whenNotPaused {
@@ -291,6 +360,10 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         }
         collateralBalance[msg.sender] += internalAmount;
         emit BadDebtCovered(amount);
+    }
+
+    function getAccountMarkets(address account) external view returns (bytes32[] memory) {
+        return accountMarkets[account];
     }
 
     function applyTrade(FillSettlement calldata fill) external nonReentrant whenNotPaused onlyOrderbook {
@@ -342,6 +415,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
             }
         }
 
+        _updateSideSizes(market, prevSize, position.size);
         _syncAccountMarket(fill.account, fill.marketId, prevSize, position.size);
 
         if (market.maxAccountExposure > 0 && position.size != 0) {
@@ -401,6 +475,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
 
         uint256 newNotional = _positionNotional(position.size, position.entryPrice);
         market.openInterest = market.openInterest + newNotional - prevNotional;
+        _updateSideSizes(market, prevSize, position.size);
         _syncAccountMarket(account, marketId, prevSize, position.size);
 
         if (position.size == 0) {
@@ -410,7 +485,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         emit LiquidationExecuted(account, msg.sender, marketId, closeSize, price, pnl, paid);
     }
 
-    function adlClose(address account, bytes32 marketId, uint256 sizeAbs) external nonReentrant whenNotPaused onlyOwner {
+    function adlClose(address account, bytes32 marketId, uint256 sizeAbs) external nonReentrant whenNotPaused onlyAdlKeeper {
         if (!adlEnabled) revert AdlDisabled();
         Position storage position = positions[account][marketId];
         if (position.size == 0) revert InvalidAmount();
@@ -427,8 +502,9 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         int256 closeSize = position.size > 0 ? int256(closeAbs) : -int256(closeAbs);
         int256 pnl = _pnl(closeSize, position.entryPrice, price);
 
-        uint256 prevNotional = _positionNotional(position.size, position.entryPrice);
-        int256 remaining = position.size - closeSize;
+        int256 prevSize = position.size;
+        uint256 prevNotional = _positionNotional(prevSize, position.entryPrice);
+        int256 remaining = prevSize - closeSize;
         position.size = remaining;
         if (remaining == 0) {
             position.entryPrice = 0;
@@ -439,7 +515,8 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
 
         uint256 newNotional = _positionNotional(position.size, position.entryPrice);
         market.openInterest = market.openInterest + newNotional - prevNotional;
-        _syncAccountMarket(account, marketId, position.size + closeSize, position.size);
+        _updateSideSizes(market, prevSize, position.size);
+        _syncAccountMarket(account, marketId, prevSize, position.size);
 
         emit AdlExecuted(account, marketId, closeSize, price, pnl);
     }
@@ -539,6 +616,20 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
                 accountMarkets[account].pop();
                 delete accountMarketIndex[account][marketId];
             }
+        }
+    }
+
+    function _updateSideSizes(Market storage market, int256 prevSize, int256 nextSize) internal {
+        if (prevSize > 0) {
+            market.longSize -= _abs(prevSize);
+        } else if (prevSize < 0) {
+            market.shortSize -= _abs(prevSize);
+        }
+
+        if (nextSize > 0) {
+            market.longSize += _abs(nextSize);
+        } else if (nextSize < 0) {
+            market.shortSize += _abs(nextSize);
         }
     }
 

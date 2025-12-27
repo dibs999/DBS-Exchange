@@ -72,7 +72,7 @@ export default function App() {
 
   // Check if onboarding should be shown
   useEffect(() => {
-    const hasCompleted = localStorage.getItem('obsidian-onboarding-completed');
+    const hasCompleted = localStorage.getItem('dbs-onboarding-completed');
     if (!hasCompleted && isConnected) {
       setOnboardingOpen(true);
     }
@@ -162,17 +162,18 @@ export default function App() {
             <span className="brand-dot" />
             <div className="brand-copy">
               <div className="brand-row">
-                <p className="brand-title">Obsidian Drift</p>
-                <span className="pill subtle">Hyperliquid-inspired</span>
+                <p className="brand-title">DBS Exchange</p>
+                <span className="pill subtle">DBS V2</span>
               </div>
-              <p className="muted small">Sepolia perps lab</p>
+              <p className="muted small">Base perps desk</p>
             </div>
           </div>
           <nav className="nav">
-            <a href="#terminal" aria-label={t('nav.terminal')}>{t('nav.terminal')}</a>
-            <a href="#markets" aria-label={t('nav.markets')}>{t('nav.markets')}</a>
-            <a href="#liquidity" aria-label={t('nav.liquidity')}>{t('nav.liquidity')}</a>
-            <a href="#risk" aria-label={t('nav.risk')}>{t('nav.risk')}</a>
+            <a href="#terminal" aria-label="Trade">Trade</a>
+            <a href="#markets" aria-label="Markets">Markets</a>
+            <a href="#portfolio" aria-label="Portfolio">Portfolio</a>
+            <a href="#liquidity" aria-label="Vaults">Vaults</a>
+            <a href="#risk" aria-label="Risk">Risk</a>
           </nav>
           <div className="nav-actions">
             <span className={`pill status-pill ${isWsConnected ? 'positive' : 'negative'}`}>
@@ -187,7 +188,7 @@ export default function App() {
             >
               ⚙️
             </button>
-            <button className="btn ghost" aria-label={t('nav.docs')}>{t('nav.docs')}</button>
+            <button className="btn ghost" aria-label="Docs">Docs</button>
             <button 
               className="btn ghost" 
               onClick={() => setOnboardingOpen(true)}
@@ -201,7 +202,7 @@ export default function App() {
         </header>
 
         <main>
-          {/* Market Overview Header - Hyperliquid Style */}
+          {/* Market Overview Header */}
           <section className="market-overview">
             <div className="market-header">
               <div className="market-title">
@@ -277,11 +278,18 @@ export default function App() {
             ))}
           </section>
 
-          {/* Trading Terminal - 3 Column Layout */}
+          {/* Trading Terminal */}
           <section className="terminal" id="terminal">
             <div className="terminal-layout">
-              {/* Left Column: Orderbook & Trades */}
+              {/* Left Column: Chart */}
               <div className="terminal-left">
+                <div className="chart-container">
+                  <TradingViewChart symbol={activeMarket?.symbol ?? 'ETHUSD'} />
+                </div>
+              </div>
+
+              {/* Center Column: Orderbook & Trades */}
+              <div className="terminal-center">
                 {isLoadingSnapshot ? (
                   <OrderbookSkeleton />
                 ) : (
@@ -295,11 +303,8 @@ export default function App() {
                 <Trades data={trades} />
               </div>
 
-              {/* Center Column: Chart & Order Entry */}
-              <div className="terminal-center">
-                <div className="chart-container">
-                  <TradingViewChart symbol={activeMarket?.symbol ?? 'ETHUSD'} />
-                </div>
+              {/* Right Column: Order Entry + Account */}
+              <div className="terminal-right">
                 <div className="order-entry-container">
                   <OrderEntry 
                     marketId={activeMarketId}
@@ -307,50 +312,13 @@ export default function App() {
                     prefill={ticketPrefill}
                   />
                 </div>
-              </div>
-
-              {/* Right Column: Positions, Orders, Account */}
-              <div className="terminal-right">
                 {isConnected && address ? (
-                  <>
-                    <AccountPanel 
-                      positions={positions}
-                      onDeposit={() => setDepositModalOpen(true)}
-                      onWithdraw={() => setWithdrawModalOpen(true)}
-                      onFaucet={() => setFaucetModalOpen(true)}
-                    />
-                    <div className="terminal-tabs">
-                      <button 
-                        className={`tab ${terminalTab === 'positions' ? 'active' : ''}`}
-                        onClick={() => setTerminalTab('positions')}
-                      >
-                        Positions
-                      </button>
-                      <button 
-                        className={`tab ${terminalTab === 'orders' ? 'active' : ''}`}
-                        onClick={() => setTerminalTab('orders')}
-                      >
-                        Orders
-                      </button>
-                      <button 
-                        className={`tab ${terminalTab === 'history' ? 'active' : ''}`}
-                        onClick={() => setTerminalTab('history')}
-                      >
-                        History
-                      </button>
-                    </div>
-                    <div className="terminal-content">
-                      {terminalTab === 'positions' && (
-                        isLoadingSnapshot ? <PositionsSkeleton /> : <Positions data={positions} />
-                      )}
-                      {terminalTab === 'orders' && (
-                        <OpenOrders data={orders} />
-                      )}
-                      {terminalTab === 'history' && (
-                        <TradeHistory address={address} />
-                      )}
-                    </div>
-                  </>
+                  <AccountPanel 
+                    positions={positions}
+                    onDeposit={() => setDepositModalOpen(true)}
+                    onWithdraw={() => setWithdrawModalOpen(true)}
+                    onFaucet={() => setFaucetModalOpen(true)}
+                  />
                 ) : (
                   <div className="connect-prompt">
                     <h3>Connect Wallet</h3>
@@ -359,6 +327,50 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="terminal-bottom" id="portfolio">
+              {isConnected && address ? (
+                <>
+                  <div className="terminal-tabs">
+                    <button 
+                      className={`tab ${terminalTab === 'positions' ? 'active' : ''}`}
+                      onClick={() => setTerminalTab('positions')}
+                    >
+                      Positions
+                    </button>
+                    <button 
+                      className={`tab ${terminalTab === 'orders' ? 'active' : ''}`}
+                      onClick={() => setTerminalTab('orders')}
+                    >
+                      Orders
+                    </button>
+                    <button 
+                      className={`tab ${terminalTab === 'history' ? 'active' : ''}`}
+                      onClick={() => setTerminalTab('history')}
+                    >
+                      History
+                    </button>
+                  </div>
+                  <div className="terminal-content">
+                    {terminalTab === 'positions' && (
+                      isLoadingSnapshot ? <PositionsSkeleton /> : <Positions data={positions} />
+                    )}
+                    {terminalTab === 'orders' && (
+                      <OpenOrders data={orders} />
+                    )}
+                    {terminalTab === 'history' && (
+                      <TradeHistory address={address} />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="connect-prompt">
+                  <h3>Connect Wallet</h3>
+                  <p className="muted">Connect your wallet to view positions and history.</p>
+                  <WalletButton />
+                </div>
+              )}
             </div>
           </section>
 
@@ -480,7 +492,7 @@ export default function App() {
         <footer className="footer">
           <div className="footer-brand">
             <span className="brand-dot" />
-            <span>Obsidian Drift</span>
+            <span>DBS Exchange</span>
           </div>
           <div className="footer-links">
             <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -489,7 +501,7 @@ export default function App() {
             <a href="https://twitter.com" target="_blank" rel="noopener noreferrer">Twitter</a>
           </div>
           <div className="footer-info">
-            <span className="muted small">Sepolia Testnet</span>
+            <span className="muted small">Base Mainnet</span>
             <span className="muted small">•</span>
             <span className="muted small">v0.1.0-beta</span>
           </div>

@@ -14,26 +14,26 @@ type OnboardingModalProps = {
 const STEPS = [
   {
     id: 'welcome',
-    title: { de: 'Willkommen bei Obsidian Drift', en: 'Welcome to Obsidian Drift' },
+    title: { de: 'Willkommen bei DBS Exchange', en: 'Welcome to DBS Exchange' },
     content: {
-      de: 'Eine dezentrale Perpetuals-Börse auf Sepolia Testnet. Handeln Sie mit Hebel und verwalten Sie Ihre Positionen on-chain.',
-      en: 'A decentralized perpetuals exchange on Sepolia Testnet. Trade with leverage and manage your positions on-chain.',
+      de: 'Eine dezentrale Perpetuals-Börse. Handeln Sie mit Hebel und verwalten Sie Ihre Positionen on-chain.',
+      en: 'A decentralized perpetuals exchange. Trade with leverage and manage your positions on-chain.',
     },
   },
   {
     id: 'wallet',
     title: { de: 'Wallet verbinden', en: 'Connect Wallet' },
     content: {
-      de: 'Verbinden Sie Ihr Wallet, um zu handeln. Stellen Sie sicher, dass Sie auf Sepolia Testnet sind.',
-      en: 'Connect your wallet to start trading. Make sure you are on Sepolia Testnet.',
+      de: 'Verbinden Sie Ihr Wallet, um zu handeln. Stellen Sie sicher, dass Sie im richtigen Netzwerk sind.',
+      en: 'Connect your wallet to start trading. Make sure you are on the correct network.',
     },
   },
   {
     id: 'deposit',
     title: { de: 'oUSD einzahlen', en: 'Deposit oUSD' },
     content: {
-      de: 'Einzahlen Sie oUSD als Collateral für Ihre Positionen. Sie können jederzeit ungenutztes Collateral abheben.',
-      en: 'Deposit oUSD as collateral for your positions. You can withdraw unused collateral at any time.',
+      de: 'Zahlen Sie Collateral ein, um Positionen zu eröffnen. Sie können ungenutztes Collateral jederzeit abheben.',
+      en: 'Deposit collateral to open positions. You can withdraw unused collateral at any time.',
     },
   },
   {
@@ -54,7 +54,7 @@ export default function OnboardingModal({ isOpen, onClose, onComplete }: Onboard
   const [skipOnboarding, setSkipOnboarding] = useState(false);
 
   useEffect(() => {
-    const hasCompleted = localStorage.getItem('obsidian-onboarding-completed');
+    const hasCompleted = localStorage.getItem('dbs-onboarding-completed');
     if (hasCompleted === 'true') {
       setSkipOnboarding(true);
     }
@@ -69,7 +69,7 @@ export default function OnboardingModal({ isOpen, onClose, onComplete }: Onboard
 
   function handleNext() {
     if (isLastStep) {
-      localStorage.setItem('obsidian-onboarding-completed', 'true');
+      localStorage.setItem('dbs-onboarding-completed', 'true');
       onComplete();
     } else {
       setCurrentStep(currentStep + 1);
@@ -77,7 +77,7 @@ export default function OnboardingModal({ isOpen, onClose, onComplete }: Onboard
   }
 
   function handleSkip() {
-    localStorage.setItem('obsidian-onboarding-completed', 'true');
+    localStorage.setItem('dbs-onboarding-completed', 'true');
     onClose();
   }
 
@@ -142,4 +142,3 @@ export default function OnboardingModal({ isOpen, onClose, onComplete }: Onboard
     </FocusTrap>
   );
 }
-

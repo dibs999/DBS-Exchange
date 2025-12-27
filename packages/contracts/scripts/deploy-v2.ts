@@ -61,6 +61,8 @@ async function main() {
   // Wire recipients (vault/insurance/treasury)
   await (await engine.setFeeRecipients(await vault.getAddress(), await insurance.getAddress(), deployer.address)).wait();
   await (await engine.setOrderbook(await orderbook.getAddress())).wait();
+  await (await engine.setFundingKeeper(deployer.address, true)).wait();
+  await (await engine.setAdlKeeper(deployer.address, true)).wait();
 
   // Create market defaults
   const maxOi = ethers.parseUnits("50000000", 18); // 50M notional (1e18 scale)
@@ -73,7 +75,8 @@ async function main() {
       500,  // maintenance 5%
       10,   // max leverage
       maxOi,
-      maxAccount
+      maxAccount,
+      1 // max funding rate bps per hour (0.01%/hr)
     )
   ).wait();
 

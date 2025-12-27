@@ -17,7 +17,7 @@ export default function NetworkBanner() {
       <div className="network-banner-content">
         <span className="network-icon">⚠️</span>
         <span>
-          You're connected to the wrong network. Please switch to <strong>Sepolia Testnet</strong> to use Obsidian Drift.
+          You're connected to the wrong network. Please switch to <strong>Sepolia Testnet</strong> to use DBS Exchange.
         </span>
         <button 
           className="btn primary small" 
@@ -30,4 +30,3 @@ export default function NetworkBanner() {
     </div>
   );
 }
-

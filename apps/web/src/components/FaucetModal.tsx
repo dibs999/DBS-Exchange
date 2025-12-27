@@ -251,7 +251,7 @@ export default function FaucetModal({ isOpen, onClose }: FaucetModalProps) {
             </div>
             <div className="info-row">
               <span className="label">Token</span>
-              <span>oUSD (Obsidian USD)</span>
+              <span>oUSD (DBS USD)</span>
             </div>
             <div className="info-row">
               <span className="label">Amount</span>
@@ -322,4 +322,3 @@ export default function FaucetModal({ isOpen, onClose }: FaucetModalProps) {
     </FocusTrap>
   );
 }
-
