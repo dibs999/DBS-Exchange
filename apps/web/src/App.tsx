@@ -140,6 +140,15 @@ export default function App() {
     return { abs, pct };
   }, [activeMarket]);
 
+  const shortAddress = useMemo(() => {
+    if (!address) return null;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  }, [address]);
+
+  const greetingLine = isConnected
+    ? 'Wallet verbunden – lade Testguthaben oder spring direkt ins Terminal.'
+    : 'Verbinde dein Wallet, erhalte Test-oUSD und starte sofort ins Orderbuch.';
+
   return (
     <ToastProvider>
       <SettingsProvider>
@@ -193,27 +202,39 @@ export default function App() {
         <main>
           <section className="hero">
             <div className="hero-left">
-              <p className="eyebrow">Sepolia testnet perpetuals</p>
-              <h1>
-                Trade in the dark,
-                <span> settle in gold.</span>
-              </h1>
-              <div className="hero-badges">
-                <span className="pill neon">CLOB perps</span>
-                <span className="pill outline">Unified margin</span>
-                <span className="pill outline">Oracle indexed</span>
+              <div className="hero-topline">
+                <span className="pill neon">DBS Exchange</span>
+                <span className="pill outline">Sepolia</span>
+                <span className={`pill status-pill ${isWsConnected ? 'positive' : 'negative'}`}>
+                  <span className="pulse-dot" aria-hidden />
+                  {isWsConnected ? 'Live-Orderbuch' : 'Snapshot-Ansicht'}
+                </span>
               </div>
-              <p className="muted">
-                Obsidian Drift is a modular perps exchange with on-chain margin, oracle-indexed pricing, and
-                streamlined risk controls. Built for rapid experimentation on Sepolia.
-              </p>
+              <p className="eyebrow">Welcome to the vault</p>
+              <h1>Willkommen bei Obsidian Drift</h1>
+              <p className="hero-lead">{greetingLine}</p>
               <div className="hero-actions">
                 <button className="btn primary" onClick={() => document.getElementById('terminal')?.scrollIntoView({ behavior: 'smooth' })}>
-                  Start trading
+                  Zum Terminal
                 </button>
-                <button className="btn ghost">View architecture</button>
+                <button className="btn secondary" onClick={() => setFaucetModalOpen(true)}>
+                  Testnet-Faucet
+                </button>
+                <button className="btn ghost" onClick={() => setDepositModalOpen(true)} disabled={!isConnected}>
+                  Collateral einzahlen
+                </button>
+              </div>
+              <div className="hero-badges">
+                <span className="pill outline">TradingView integriert</span>
+                <span className="pill outline">Cross-Margin Engine</span>
+                <span className="pill outline">WalletConnect ready</span>
               </div>
               <div className="hero-metrics">
+                <div className="metric highlight">
+                  <p className="label">Wallet</p>
+                  <strong>{isConnected ? 'Verbunden' : 'Nicht verbunden'}</strong>
+                  <p className="muted small">{isConnected ? shortAddress : 'MetaMask & WalletConnect werden unterstützt.'}</p>
+                </div>
                 {heroStats.map((stat, idx) => (
                   <div key={stat.label} className="metric" style={{ ['--delay' as string]: `${idx * 0.08}s` }}>
                     <p className="label">{stat.label}</p>
@@ -255,6 +276,26 @@ export default function App() {
                     <p className="muted small">Minted for Sepolia testing.</p>
                   </div>
                   <div className="pill ghost">Latency tuned</div>
+                </div>
+              </div>
+              <div className="hero-card connect-card" id="connect-card">
+                <div className="connect-card-head">
+                  <div>
+                    <p className="label">Sofort loslegen</p>
+                    <h3>Verbinde dein Wallet hier im Hero.</h3>
+                  </div>
+                  <span className="pill ghost">{isConnected ? 'Bereit' : 'One-tap'}</span>
+                </div>
+                <p className="muted small">
+                  Wir begrüßen dich mit einem aufgeräumten, echten Exchange-Gefühl – inklusive WalletConnect-Unterstützung und direktem Zugriff auf das Orderbuch.
+                </p>
+                <div className="wallet-connect-inline">
+                  <WalletButton />
+                </div>
+                <div className="connect-foot">
+                  <span className="pill outline">oUSD Collateral</span>
+                  <span className="pill outline">Cross-Margin</span>
+                  <span className="pill outline">Funding synced</span>
                 </div>
               </div>
               <div className="hero-cta">
