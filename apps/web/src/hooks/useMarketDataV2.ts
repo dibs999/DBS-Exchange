@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAccount } from 'wagmi';
 import { Market, Order, Orderbook, Position, PriceFeed, Trade, WsMessage } from '@dbs/shared';
 import { API_URL, getWsUrl, secureFetch } from '../lib/api';
 
@@ -16,46 +17,22 @@ const fallbackMarkets: Market[] = [
     fundingRate: 0.004,
     openInterest: 92_000_000,
   },
-  {
-    id: 'BTC-USD',
-    base: 'BTC',
-    quote: 'USD',
-    symbol: 'BTC/USD',
-    tvSymbol: 'BINANCE:BTCUSDT',
-    markPrice: 62750,
-    indexPrice: 62612,
-    change24h: -0.6,
-    volume24h: 1_240_000_000,
-    fundingRate: 0.002,
-    openInterest: 220_000_000,
-  },
 ];
 
 const fallbackOrderbook: Orderbook = {
-  bids: Array.from({ length: 8 }).map((_, idx) => ({
-    price: 3200 - idx * 1.6,
-    size: 1 + idx * 0.15,
-    total: 1 + idx * 0.2,
-  })),
-  asks: Array.from({ length: 8 }).map((_, idx) => ({
-    price: 3200 + idx * 1.6,
-    size: 1 + idx * 0.12,
-    total: 1 + idx * 0.18,
-  })),
+  bids: [],
+  asks: [],
 };
 
-const fallbackTrades: Trade[] = [
-  { id: 't1', time: '09:20:14', price: 3201.2, size: 0.18, side: 'buy' },
-  { id: 't2', time: '09:20:10', price: 3199.7, size: 0.42, side: 'sell' },
-  { id: 't3', time: '09:20:04', price: 3200.1, size: 0.08, side: 'buy' },
-];
+const fallbackTrades: Trade[] = [];
 
 const fallbackPrices: PriceFeed = {
   ethereum: { usd: 3200, change24h: 1.2 },
   'usd-coin': { usd: 1, change24h: 0 },
 };
 
-export function useMarketData(activeMarketId: string, address?: string) {
+export function useMarketDataV2(activeMarketId: string, address?: string) {
+  const { address: accountAddress } = useAccount();
   const [markets, setMarkets] = useState<Market[]>(fallbackMarkets);
   const [orderbook, setOrderbook] = useState<Orderbook>(fallbackOrderbook);
   const [trades, setTrades] = useState<Trade[]>(fallbackTrades);
@@ -65,6 +42,7 @@ export function useMarketData(activeMarketId: string, address?: string) {
   const [status, setStatus] = useState<string | null>(null);
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(true);
   const [isWsConnected, setIsWsConnected] = useState(false);
+  const [auctionState, setAuctionState] = useState<{ inProgress: boolean; nextAuctionAt: number | null } | null>(null);
 
   const activeMarket = useMemo(
     () => markets.find((market) => market.id === activeMarketId) ?? markets[0],
@@ -77,15 +55,19 @@ export function useMarketData(activeMarketId: string, address?: string) {
       setIsLoadingSnapshot(true);
       try {
         const [marketsRes, pricesRes, orderbookRes, tradesRes] = await Promise.all([
-          secureFetch(`${API_URL}/markets`),
+          secureFetch(`${API_URL}/v2/markets`),
           secureFetch(`${API_URL}/prices`),
-          secureFetch(`${API_URL}/orderbook?market=${activeMarketId}`),
-          secureFetch(`${API_URL}/trades/${activeMarketId}`),
+          secureFetch(`${API_URL}/v2/orderbook/${activeMarketId}`),
+          secureFetch(`${API_URL}/v2/trades/${activeMarketId}`),
         ]);
         if (!mounted) return;
         if (marketsRes.ok) setMarkets(await marketsRes.json());
         if (pricesRes.ok) setPrices(await pricesRes.json());
-        if (orderbookRes.ok) setOrderbook(await orderbookRes.json());
+        if (orderbookRes.ok) {
+          const ob = await orderbookRes.json();
+          setOrderbook(ob);
+          setAuctionState(ob.auctionState);
+        }
         if (tradesRes.ok) setTrades(await tradesRes.json());
         setStatus(null);
       } catch (err) {
@@ -110,8 +92,8 @@ export function useMarketData(activeMarketId: string, address?: string) {
       }
       try {
         const [positionsRes, ordersRes] = await Promise.all([
-          secureFetch(`${API_URL}/positions/${address}`),
-          secureFetch(`${API_URL}/orders?address=${address}`),
+          secureFetch(`${API_URL}/v2/positions/${address}`),
+          secureFetch(`${API_URL}/v2/orders/${address}`),
         ]);
         if (!mounted) return;
         if (positionsRes.ok) setPositions(await positionsRes.json());
@@ -140,17 +122,23 @@ export function useMarketData(activeMarketId: string, address?: string) {
       if (message.type === 'prices') {
         setPrices(message.data);
       }
-      if (message.type === 'orderbook' && message.marketId === activeMarketId) {
+      if (message.type === 'v2:orderbook' && message.marketId === activeMarketId) {
         setOrderbook(message.data);
+        if ((message.data as any).auctionState) {
+          setAuctionState((message.data as any).auctionState);
+        }
       }
-      if (message.type === 'trades' && message.marketId === activeMarketId) {
+      if (message.type === 'v2:trades' && message.marketId === activeMarketId) {
         setTrades(message.data);
       }
-      if (message.type === 'positions' && address && message.address.toLowerCase() === address.toLowerCase()) {
+      if (message.type === 'v2:positions' && address && message.address?.toLowerCase() === address.toLowerCase()) {
         setPositions(message.data);
       }
-      if (message.type === 'orders' && address && message.address.toLowerCase() === address.toLowerCase()) {
+      if (message.type === 'v2:orders' && address && message.address?.toLowerCase() === address.toLowerCase()) {
         setOrders(message.data);
+      }
+      if (message.type === 'v2:auction' && message.marketId === activeMarketId) {
+        setAuctionState(message.data as any);
       }
     };
     ws.onerror = () => {
@@ -176,5 +164,7 @@ export function useMarketData(activeMarketId: string, address?: string) {
     status,
     isLoadingSnapshot,
     isWsConnected,
+    auctionState,
   };
 }
+

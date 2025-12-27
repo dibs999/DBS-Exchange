@@ -15,6 +15,9 @@ contract OracleRouter is OwnableUpgradeable, UUPSUpgradeable {
         uint256 maxPriceAge;
         uint256 maxDeviationBps;
         uint256 twapWindow;
+        uint256 minSources; // Minimum number of valid sources required
+        bool circuitBreakerEnabled; // Circuit breaker for extreme deviations
+        uint256 circuitBreakerThresholdBps; // Threshold for circuit breaker (e.g., 10% = 1000 bps)
     }
 
     struct PriceData {
@@ -27,6 +30,7 @@ contract OracleRouter is OwnableUpgradeable, UUPSUpgradeable {
     mapping(bytes32 => address[]) public sources;
 
     event MarketConfigUpdated(bytes32 indexed marketId, uint256 maxPriceAge, uint256 maxDeviationBps, uint256 twapWindow);
+    event CircuitBreakerTriggered(bytes32 indexed marketId, uint256 price, uint256 deviationBps);
     event SourcesUpdated(bytes32 indexed marketId, uint256 count);
     event PriceUpdated(bytes32 indexed marketId, uint256 price, uint256 timestamp);
     event PriceSetManually(bytes32 indexed marketId, uint256 price, uint256 timestamp);
@@ -42,13 +46,21 @@ contract OracleRouter is OwnableUpgradeable, UUPSUpgradeable {
         bytes32 marketId,
         uint256 maxPriceAge,
         uint256 maxDeviationBps,
-        uint256 twapWindow
+        uint256 twapWindow,
+        uint256 minSources,
+        bool circuitBreakerEnabled,
+        uint256 circuitBreakerThresholdBps
     ) external onlyOwner {
         require(maxDeviationBps <= BPS, "Bad deviation");
+        require(minSources > 0, "minSources=0");
+        require(circuitBreakerThresholdBps <= BPS, "Bad circuit breaker threshold");
         marketConfigs[marketId] = MarketConfig({
             maxPriceAge: maxPriceAge,
             maxDeviationBps: maxDeviationBps,
-            twapWindow: twapWindow
+            twapWindow: twapWindow,
+            minSources: minSources,
+            circuitBreakerEnabled: circuitBreakerEnabled,
+            circuitBreakerThresholdBps: circuitBreakerThresholdBps
         });
         emit MarketConfigUpdated(marketId, maxPriceAge, maxDeviationBps, twapWindow);
     }
@@ -67,11 +79,26 @@ contract OracleRouter is OwnableUpgradeable, UUPSUpgradeable {
 
     function updatePrice(bytes32 marketId) external returns (uint256) {
         (uint256 aggPrice, uint256 validCount) = _aggregatePrice(marketId);
+        
+        MarketConfig memory cfg = marketConfigs[marketId];
+        
+        // Require minimum number of sources
+        require(validCount >= cfg.minSources, "Insufficient sources");
         require(validCount > 0, "No price");
 
-        MarketConfig memory cfg = marketConfigs[marketId];
         PriceData memory prev = prices[marketId];
 
+        // Circuit breaker check
+        if (prev.price > 0 && cfg.circuitBreakerEnabled && cfg.circuitBreakerThresholdBps > 0) {
+            uint256 diff = aggPrice > prev.price ? aggPrice - prev.price : prev.price - aggPrice;
+            uint256 deviationBps = (diff * BPS) / prev.price;
+            if (deviationBps >= cfg.circuitBreakerThresholdBps) {
+                emit CircuitBreakerTriggered(marketId, aggPrice, deviationBps);
+                revert("Circuit breaker triggered");
+            }
+        }
+
+        // Normal deviation check
         if (prev.price > 0 && cfg.maxDeviationBps > 0) {
             uint256 diff = aggPrice > prev.price ? aggPrice - prev.price : prev.price - aggPrice;
             require((diff * BPS) <= (prev.price * cfg.maxDeviationBps), "Max deviation");
@@ -105,16 +132,47 @@ contract OracleRouter is OwnableUpgradeable, UUPSUpgradeable {
         MarketConfig memory cfg = marketConfigs[marketId];
         uint256 sum = 0;
         uint256 nowTs = block.timestamp;
+        uint256[] memory validPrices = new uint256[](list.length);
+        uint256 validIndex = 0;
 
+        // Collect all valid prices
         for (uint256 i = 0; i < list.length; i++) {
             (uint256 price, uint256 updatedAt) = IPriceSource(list[i]).getPriceData(marketId);
             if (price == 0 || updatedAt == 0) continue;
             if (cfg.maxPriceAge > 0 && nowTs - updatedAt > cfg.maxPriceAge) continue;
-            sum += price;
-            validCount += 1;
+            validPrices[validIndex] = price;
+            validIndex++;
+        }
+        
+        validCount = validIndex;
+        if (validCount == 0) {
+            return (0, 0);
         }
 
-        if (validCount > 0) {
+        // Remove outliers (median-based approach for better resistance to manipulation)
+        if (validCount >= 3) {
+            // Sort prices (simple bubble sort for small arrays)
+            for (uint256 i = 0; i < validCount - 1; i++) {
+                for (uint256 j = 0; j < validCount - i - 1; j++) {
+                    if (validPrices[j] > validPrices[j + 1]) {
+                        uint256 temp = validPrices[j];
+                        validPrices[j] = validPrices[j + 1];
+                        validPrices[j + 1] = temp;
+                    }
+                }
+            }
+            
+            // Use median for better manipulation resistance
+            if (validCount % 2 == 0) {
+                aggPrice = (validPrices[validCount / 2 - 1] + validPrices[validCount / 2]) / 2;
+            } else {
+                aggPrice = validPrices[validCount / 2];
+            }
+        } else {
+            // For < 3 sources, use average
+            for (uint256 i = 0; i < validCount; i++) {
+                sum += validPrices[i];
+            }
             aggPrice = sum / validCount;
         }
     }

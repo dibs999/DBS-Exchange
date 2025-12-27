@@ -66,6 +66,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
     uint256 public liquidationFeeBps;
     uint256 public badDebt;
     bool public adlEnabled;
+    uint256 public adlThreshold; // Insurance fund threshold for ADL (in 1e18)
 
     mapping(bytes32 => Market) public markets;
     mapping(address => mapping(bytes32 => Position)) public positions;
@@ -112,6 +113,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
     event BadDebtIncreased(uint256 amount);
     event AdlToggled(bool enabled);
     event BadDebtCovered(uint256 amount);
+    event AdlThresholdUpdated(uint256 threshold);
 
     error InvalidAmount();
     error MarketInactive();
@@ -162,6 +164,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         vaultFeeShareBps = 7000;
         insuranceFeeShareBps = 2500;
         treasuryFeeShareBps = 500;
+        adlThreshold = 100_000 * 1e18; // 100k USDC default threshold (in 1e18)
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
@@ -208,6 +211,20 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
     function toggleAdl(bool enabled) external onlyOwner {
         adlEnabled = enabled;
         emit AdlToggled(enabled);
+    }
+
+    function setAdlThreshold(uint256 threshold) external onlyOwner {
+        adlThreshold = threshold;
+        emit AdlThresholdUpdated(threshold);
+    }
+
+    function checkAndEnableAdl() internal {
+        if (insuranceFund == address(0)) return;
+        uint256 insuranceBalance = collateralBalance[insuranceFund];
+        if (insuranceBalance < adlThreshold && !adlEnabled) {
+            adlEnabled = true;
+            emit AdlToggled(true);
+        }
     }
 
     function setFundingKeeper(address keeper, bool allowed) external onlyOwner {
@@ -371,6 +388,15 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         Market storage market = markets[fill.marketId];
         if (!market.active) revert MarketInactive();
         if (fill.price == 0) revert InvalidAmount();
+        
+        // Get current oracle price for slippage check
+        uint256 oraclePrice = _getPrice(fill.marketId);
+        
+        // Check slippage against oracle (max 5% deviation allowed)
+        uint256 maxSlippageBps = 500; // 5%
+        uint256 priceDiff = fill.price > oraclePrice ? fill.price - oraclePrice : oraclePrice - fill.price;
+        uint256 slippageBps = (priceDiff * BPS) / oraclePrice;
+        require(slippageBps <= maxSlippageBps, "Price deviation too high");
 
         _updateFunding(fill.marketId);
         Position storage position = positions[fill.account][fill.marketId];
@@ -527,6 +553,7 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
         if (insurance >= deficit) {
             collateralBalance[insuranceFund] -= deficit;
             collateralBalance[account] += deficit;
+            checkAndEnableAdl(); // Check if insurance fund fell below threshold
             return;
         }
         if (insurance > 0) {
@@ -534,12 +561,10 @@ contract PerpEngineV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuar
             collateralBalance[account] += insurance;
             deficit -= insurance;
         }
+        checkAndEnableAdl(); // Check if insurance fund fell below threshold
         badDebt += deficit;
         emit BadDebtIncreased(deficit);
-        if (!adlEnabled) {
-            adlEnabled = true;
-            emit AdlToggled(true);
-        }
+        checkAndEnableAdl();
     }
 
     function _chargeFee(address account, uint256 notional, uint256 feeBps) internal {

@@ -85,6 +85,10 @@ const translations: Translations = {
   'settings.notifications.sound': { de: 'Sound-Benachrichtigungen aktivieren', en: 'Enable sound notifications' },
   'settings.display': { de: 'Anzeige', en: 'Display' },
   'settings.display.compact': { de: 'Kompaktmodus (kleinere UI-Elemente)', en: 'Compact mode (smaller UI elements)' },
+  'settings.language': { de: 'Sprache', en: 'Language' },
+  'settings.language.desc': { de: 'Interface-Sprache wählen (Deutsch/English).', en: 'Choose the interface language (Deutsch/English).' },
+  'settings.language.de': { de: 'Deutsch', en: 'Deutsch' },
+  'settings.language.en': { de: 'Englisch', en: 'English' },
   
   // Network
   'network.wrong': { de: 'Sie sind mit dem falschen Netzwerk verbunden. Bitte wechseln Sie zu Sepolia Testnet.', en: "You're connected to the wrong network. Please switch to Sepolia Testnet." },
@@ -137,4 +141,3 @@ export function useI18n() {
   }
   return context;
 }
-

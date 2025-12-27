@@ -79,7 +79,7 @@
 - Orderbook/Trades: Live WS, Spread/Tick-Bands, Auction-Countdown/Result.
 - Positions: Margin/Funding/PnL aus V2, Liq-Preis auf Basis Contract-Params, Health-Bar.
 - Vault UI: echte USDC-Ein/Auszahlung, Shares, Fee-Yield, ggf. Claim.
-- Settings: Switch V1/V2, Netzwerk-Hinweise.
+- Settings: Switch V1/V2, Netzwerk-Hinweise, Sprache (DE/EN).
 
 ## 12. Deployment & Ops (Base)
 - Hardhat: Base-Netzwerk, Proxy-Deploy (UUPS) für Router/Orderbook/Engine/Vault/Insurance.

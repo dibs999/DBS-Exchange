@@ -20,6 +20,34 @@ export function getPool(): pg.Pool {
   return pool;
 }
 
+async function executeSchema(pool: pg.Pool, schemaPath: string, schemaName: string) {
+  const fs = await import('fs');
+  const path = await import('path');
+  const fullPath = path.join(process.cwd(), schemaPath);
+  
+  if (!fs.existsSync(fullPath)) {
+    console.warn(`${schemaName} schema file not found: ${fullPath}`);
+    return;
+  }
+  
+  const schema = fs.readFileSync(fullPath, 'utf-8');
+  const statements = schema.split(';').filter(s => s.trim().length > 0);
+  
+  for (const statement of statements) {
+    if (statement.trim()) {
+      try {
+        await pool.query(statement);
+      } catch (err: any) {
+        // Ignore "already exists" errors
+        if (err.code !== '42P07' && !err.message.includes('already exists')) {
+          console.warn(`${schemaName} schema statement warning:`, err.message);
+        }
+      }
+    }
+  }
+  console.log(`${schemaName} schema initialized`);
+}
+
 export async function initDb() {
   if (!env.databaseUrl) {
     console.warn('DATABASE_URL not set; skipping database initialization');
@@ -29,27 +57,13 @@ export async function initDb() {
   const pool = getPool();
   
   try {
-    // Read and execute schema
-    const fs = await import('fs');
-    const path = await import('path');
-    const schemaPath = path.join(process.cwd(), 'src/db/schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf-8');
+    // Initialize V1 schema
+    await executeSchema(pool, 'src/db/schema.sql', 'V1');
     
-    // Execute schema (split by semicolon for multiple statements)
-    const statements = schema.split(';').filter(s => s.trim().length > 0);
-    for (const statement of statements) {
-      if (statement.trim()) {
-        try {
-          await pool.query(statement);
-        } catch (err: any) {
-          // Ignore "already exists" errors
-          if (err.code !== '42P07' && !err.message.includes('already exists')) {
-            console.warn('Schema statement warning:', err.message);
-          }
-        }
-      }
-    }
-    console.log('Database schema initialized');
+    // Initialize V2 schema
+    await executeSchema(pool, 'src/db/schema-v2.sql', 'V2');
+    
+    console.log('Database schemas initialized');
   } catch (err: any) {
     console.error('Failed to initialize database:', err);
     throw err;

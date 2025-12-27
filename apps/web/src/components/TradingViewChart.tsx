@@ -9,14 +9,25 @@ export default function TradingViewChart({ symbol }: Props) {
 
   useEffect(() => {
     if (!container.current) return;
-    container.current.innerHTML = '';
+    // Clear container safely (avoid innerHTML for XSS protection)
+    if (container.current) {
+      while (container.current.firstChild) {
+        container.current.removeChild(container.current.firstChild);
+      }
+    }
 
     const script = document.createElement('script');
     script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
     script.async = true;
-    script.innerHTML = JSON.stringify({
+    script.type = 'text/javascript';
+    
+    // Sanitize symbol to prevent XSS (remove potentially dangerous characters)
+    const sanitizedSymbol = symbol.replace(/[<>\"'&]/g, '');
+    
+    // TradingView widget requires innerHTML, but we sanitize the input
+    const config = {
       autosize: true,
-      symbol,
+      symbol: sanitizedSymbol,
       interval: '60',
       timezone: 'Etc/UTC',
       theme: 'dark',
@@ -27,12 +38,20 @@ export default function TradingViewChart({ symbol }: Props) {
       hide_side_toolbar: false,
       withdateranges: true,
       container_id: 'tv-chart',
-    });
+    };
+    
+    // JSON.stringify is safe for structured data
+    script.innerHTML = JSON.stringify(config);
 
     container.current.appendChild(script);
 
     return () => {
-      if (container.current) container.current.innerHTML = '';
+      // Cleanup safely
+      if (container.current) {
+        while (container.current.firstChild) {
+          container.current.removeChild(container.current.firstChild);
+        }
+      }
     };
   }, [symbol]);
 

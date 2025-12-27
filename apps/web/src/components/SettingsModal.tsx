@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { DEFAULT_SETTINGS, useSettings } from '../lib/settings';
+import { useI18n } from '../lib/i18n';
 
 type SettingsModalProps = {
   isOpen: boolean;
@@ -11,6 +12,7 @@ const SLIPPAGE_PRESETS = [0.1, 0.5, 1.0, 2.0];
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { settings, setSettings } = useSettings();
   const [localSettings, setLocalSettings] = useState(settings);
+  const { t, language, setLanguage } = useI18n();
 
   useEffect(() => {
     if (isOpen) {
@@ -44,7 +46,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>⚙️ Settings</h3>
+          <h3>{t('modal.settings.title')}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
@@ -123,6 +125,26 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </label>
           </div>
 
+          {/* Language */}
+          <div className="settings-section">
+            <h4>{t('settings.language')}</h4>
+            <p className="muted small">{t('settings.language.desc')}</p>
+            <div className="slippage-options">
+              <button
+                className={`slippage-btn ${language === 'de' ? 'active' : ''}`}
+                onClick={() => setLanguage('de')}
+              >
+                {t('settings.language.de')}
+              </button>
+              <button
+                className={`slippage-btn ${language === 'en' ? 'active' : ''}`}
+                onClick={() => setLanguage('en')}
+              >
+                {t('settings.language.en')}
+              </button>
+            </div>
+          </div>
+
           {/* Keyboard Shortcuts Info */}
           <div className="settings-section">
             <h4>Keyboard Shortcuts</h4>
@@ -163,4 +185,3 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     </div>
   );
 }
-

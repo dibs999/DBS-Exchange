@@ -9,9 +9,23 @@ import { appendTrade, bumpMarket, getOrders, seedMarkets, state, updateOrderStat
 import { Market, Order, Orderbook, Position, PriceFeed, Trade, WsMessage } from '@dbs/shared';
 import { initDb, getPool, closeDb } from './db/index.js';
 import { startIndexer } from './indexer.js';
+import { startIndexerV2 } from './indexer-v2.js';
 import { startOrderbookKeeper } from './keepers/orderbookKeeper.js';
 import { startLiquidationKeeper } from './keepers/liquidationKeeper.js';
 import { startFundingKeeper } from './keepers/fundingKeeper.js';
+import { startAuctionKeeper } from './keepers/auctionKeeper.js';
+import { startStopTriggerKeeper } from './keepers/stopTriggerKeeper.js';
+import { startFundingKeeperV2 } from './keepers/fundingKeeperV2.js';
+import { startLiquidationKeeperV2 } from './keepers/liquidationKeeperV2.js';
+import { startOracleRouterKeeper } from './keepers/oracleRouterKeeper.js';
+import {
+  createValidationMiddleware,
+  validateMarketIdParam,
+  validateAddressParam,
+  validateAddressQuery,
+  validatePaginationQuery,
+} from './middleware/validation.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 type PositionState = {
   marketId: string;
@@ -31,9 +45,16 @@ seedMarkets(env.marketId);
 
 const app = fastify({ logger: true });
 
+// Register error handler
+app.setErrorHandler(errorHandler);
+
 await app.register(cors, {
-  origin: env.corsOrigins.length > 0 ? env.corsOrigins : true,
+  origin: env.corsOrigins.length > 0 ? env.corsOrigins : false, // Don't allow all origins
   methods: ['GET', 'OPTIONS'],
+  credentials: false, // Don't send credentials unless needed
+  maxAge: 86400, // 24 hours preflight cache
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
 });
 await app.register(websocket);
 
@@ -48,41 +69,8 @@ app.addHook('onSend', async (_request, reply, payload) => {
   return payload;
 });
 
-// Very small in-memory rate limit (per-IP) to protect demo endpoints
-type RateEntry = { count: number; resetAt: number };
-const RATE_WINDOW_MS = 60_000;
-const rateMap = new Map<string, RateEntry>();
-
-function getClientIp(request: any): string {
-  const xfwd = request.headers?.['x-forwarded-for'];
-  if (typeof xfwd === 'string' && xfwd.length > 0) return xfwd.split(',')[0]!.trim();
-  return request.ip || request.socket?.remoteAddress || 'unknown';
-}
-
-app.addHook('onRequest', async (request, reply) => {
-  // Do not rate limit WS upgrade path (still protected by infra in real deployment).
-  if (typeof request.url === 'string' && request.url.startsWith('/ws')) return;
-
-  const ip = getClientIp(request);
-  const now = Date.now();
-  const entry = rateMap.get(ip) ?? { count: 0, resetAt: now + RATE_WINDOW_MS };
-  if (now > entry.resetAt) {
-    entry.count = 0;
-    entry.resetAt = now + RATE_WINDOW_MS;
-  }
-  entry.count += 1;
-  rateMap.set(ip, entry);
-
-  const limit = env.rateLimitPerMinute;
-  reply.header('X-RateLimit-Limit', String(limit));
-  reply.header('X-RateLimit-Remaining', String(Math.max(0, limit - entry.count)));
-  reply.header('X-RateLimit-Reset', String(Math.ceil(entry.resetAt / 1000)));
-
-  if (entry.count > limit) {
-    reply.code(429).send({ ok: false, error: 'rate_limited', message: 'Too many requests. Please slow down.' });
-    return;
-  }
-});
+// Global rate limiting (applied to all routes)
+app.addHook('onRequest', createRateLimitMiddleware(defaultRateLimitConfig));
 
 function broadcast(message: WsMessage) {
   const payload = JSON.stringify(message);
@@ -151,36 +139,59 @@ app.get('/orderbook', async (request) => {
   return state.orderbooks.get(marketId ?? '') ?? { bids: [], asks: [] };
 });
 
-app.get('/orderbook/:marketId', async (request) => {
+app.get(
+  '/orderbook/:marketId',
+  {
+    preHandler: createValidationMiddleware([validateMarketIdParam]),
+  },
+  async (request) => {
   const { marketId } = request.params as { marketId: string };
   return state.orderbooks.get(marketId) ?? { bids: [], asks: [] };
-});
+  }
+);
 
-app.get('/trades/:marketId', async (request) => {
+app.get(
+  '/trades/:marketId',
+  {
+    preHandler: createValidationMiddleware([validateMarketIdParam]),
+  },
+  async (request) => {
   const { marketId } = request.params as { marketId: string };
   return state.trades.get(marketId) ?? [];
-});
-
-app.get('/positions/:address', async (request) => {
-  const { address } = request.params as { address: string };
-  if (!isAddress(address)) {
-    return [];
   }
-  return calculatePositions(address);
-});
+);
 
-app.get('/orders', async (request) => {
+app.get(
+  '/positions/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam]),
+  },
+  async (request) => {
+  const { address } = request.params as { address: string };
+    return calculatePositions(address);
+  }
+);
+
+app.get(
+  '/orders',
+  {
+    preHandler: createValidationMiddleware([validateAddressQuery]),
+  },
+  async (request) => {
   const address = (request.query as { address?: string })?.address;
-  if (!address || !isAddress(address)) return [];
+    if (!address) return [];
   return getOrders(address);
-});
+  }
+);
 
 // History endpoints
-app.get('/history/:address', async (request) => {
+app.get(
+  '/history/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam, validatePaginationQuery]),
+  },
+  async (request) => {
   const { address } = request.params as { address: string };
-  if (!isAddress(address)) {
-    return { trades: [], positions: [] };
-  }
 
   const pool = getPool();
   try {
@@ -227,7 +238,298 @@ app.get('/history/:address', async (request) => {
   }
 });
 
-app.get('/funding/:marketId', async (request) => {
+// V2 API Endpoints
+app.get('/v2/markets', async () => {
+  const pool = getPool();
+  try {
+    // Get markets from database or contract state
+    // For now, return basic structure
+    return state.markets.map((m) => ({
+      ...m,
+      oiCap: null, // Would need to read from contract
+      exposureCap: null, // Would need to read from contract
+    }));
+  } catch (err) {
+    console.error('V2 Markets query failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/v2/orderbook/:marketId',
+  {
+    preHandler: createValidationMiddleware([validateMarketIdParam]),
+  },
+  async (request) => {
+    const { marketId } = request.params as { marketId: string };
+    const pool = getPool();
+  try {
+    // Get V2 orderbook from database
+    const result = await pool.query(
+      `SELECT order_id, side, size, filled, price, status, auction_state
+       FROM v2_orders
+       WHERE market_id = $1 AND status IN ('live', 'queued_for_auction')
+       ORDER BY price DESC, created_at ASC`,
+      [marketId]
+    );
+
+    // Build orderbook structure
+    const bids: any[] = [];
+    const asks: any[] = [];
+
+    for (const row of result.rows) {
+      const level = {
+        price: Number(row.price),
+        size: Number(row.size) - Number(row.filled || 0),
+        total: Number(row.size),
+      };
+      if (row.side === 'buy') {
+        bids.push(level);
+      } else {
+        asks.push(level);
+      }
+    }
+
+    return { bids, asks, auctionState: null }; // Would need to read auction state
+  } catch (err) {
+    console.error('V2 Orderbook query failed:', err);
+    return { bids: [], asks: [], auctionState: null };
+  }
+});
+
+app.get(
+  '/v2/trades/:marketId',
+  {
+    preHandler: createValidationMiddleware([validateMarketIdParam, validatePaginationQuery]),
+  },
+  async (request) => {
+    const { marketId } = request.params as { marketId: string };
+    const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT order_id, maker_address, taker_address, side, size, price, maker_fee, taker_fee, is_maker, created_at
+       FROM v2_trades
+       WHERE market_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [marketId]
+    );
+
+    return result.rows.map((row: any) => ({
+      id: row.order_id?.toString() || '',
+      time: row.created_at.toISOString(),
+      price: Number(row.price),
+      size: Number(row.size),
+      side: row.side,
+      makerFee: row.maker_fee ? Number(row.maker_fee) : null,
+      takerFee: row.taker_fee ? Number(row.taker_fee) : null,
+      isMaker: row.is_maker,
+    }));
+  } catch (err) {
+    console.error('V2 Trades query failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/v2/positions/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam]),
+  },
+  async (request) => {
+    const { address } = request.params as { address: string };
+
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT market_id, size, entry_price, funding_entry, opened_at
+       FROM v2_positions
+       WHERE address = $1 AND closed_at IS NULL`,
+      [address.toLowerCase()]
+    );
+
+    // Would need to read current price and calculate PnL/funding
+    return result.rows.map((row: any) => ({
+      id: `${row.market_id}-${row.opened_at}`,
+      marketId: row.market_id,
+      side: Number(row.size) >= 0 ? 'long' : 'short',
+      size: Math.abs(Number(row.size)),
+      entryPrice: Number(row.entry_price),
+      fundingEntry: Number(row.funding_entry),
+      pnl: null, // Would need to calculate
+      fundingPayment: null, // Would need to calculate
+      liquidationPrice: null, // Would need to calculate
+    }));
+  } catch (err) {
+    console.error('V2 Positions query failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/v2/orders/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam]),
+  },
+  async (request) => {
+    const { address } = request.params as { address: string };
+
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT order_id, market_id, side, type, mode, size, filled, price, trigger_price, status, auction_state, created_at
+       FROM v2_orders
+       WHERE address = $1 AND status IN ('live', 'queued_for_auction', 'trigger_pending')
+       ORDER BY created_at DESC`,
+      [address.toLowerCase()]
+    );
+
+    return result.rows.map((row: any) => ({
+      id: row.order_id.toString(),
+      marketId: row.market_id,
+      side: row.side,
+      type: row.type,
+      mode: row.mode,
+      size: Number(row.size),
+      filled: Number(row.filled || 0),
+      price: row.price ? Number(row.price) : null,
+      triggerPrice: row.trigger_price ? Number(row.trigger_price) : null,
+      status: row.status,
+      auctionState: row.auction_state,
+      createdAt: row.created_at.toISOString(),
+    }));
+  } catch (err) {
+    console.error('V2 Orders query failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/v2/vault/deposits/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam, validatePaginationQuery]),
+  },
+  async (request) => {
+    const { address } = request.params as { address: string };
+
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT assets, shares, created_at, tx_hash
+       FROM vault_deposits
+       WHERE address = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [address.toLowerCase()]
+    );
+
+    return result.rows.map((row: any) => ({
+      assets: Number(row.assets),
+      shares: Number(row.shares),
+      createdAt: row.created_at.toISOString(),
+      txHash: row.tx_hash,
+    }));
+  } catch (err) {
+    console.error('Vault deposits query failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/v2/vault/shares/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam]),
+  },
+  async (request) => {
+    const { address } = request.params as { address: string };
+
+  const pool = getPool();
+  try {
+    // Get total shares and assets from vault contract
+    // For now, return from database
+    const deposits = await pool.query(
+      `SELECT SUM(shares) as total_shares
+       FROM vault_deposits
+       WHERE address = $1`,
+      [address.toLowerCase()]
+    );
+
+    const withdrawals = await pool.query(
+      `SELECT SUM(shares) as total_withdrawn
+       FROM vault_withdrawals
+       WHERE address = $1`,
+      [address.toLowerCase()]
+    );
+
+    const shares = Number(deposits.rows[0]?.total_shares || 0) - Number(withdrawals.rows[0]?.total_withdrawn || 0);
+
+    return {
+      shares,
+      value: 0, // Would need to read from contract
+      sharePrice: 0, // Would need to read from contract
+    };
+  } catch (err) {
+    console.error('Vault shares query failed:', err);
+    return { shares: 0, value: 0, sharePrice: 0 };
+  }
+});
+
+app.get('/v2/insurance/state', async () => {
+  const pool = getPool();
+  try {
+    const result = await pool.query('SELECT balance, last_updated_at FROM insurance_fund_state WHERE id = 1');
+    if (result.rows.length === 0) {
+      return { balance: 0, lastUpdatedAt: null };
+    }
+    return {
+      balance: Number(result.rows[0].balance),
+      lastUpdatedAt: result.rows[0].last_updated_at?.toISOString() || null,
+    };
+  } catch (err) {
+    console.error('Insurance fund state query failed:', err);
+    return { balance: 0, lastUpdatedAt: null };
+  }
+});
+
+app.get(
+  '/v2/auction/:marketId',
+  {
+    preHandler: createValidationMiddleware([validateMarketIdParam, validatePaginationQuery]),
+  },
+  async (request) => {
+    const { marketId } = request.params as { marketId: string };
+    const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT clearing_price, orders_touched, buy_volume, sell_volume, matched_volume, created_at, tx_hash
+       FROM auction_history
+       WHERE market_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [marketId]
+    );
+
+    return result.rows.map((row: any) => ({
+      clearingPrice: Number(row.clearing_price),
+      ordersTouched: row.orders_touched,
+      buyVolume: Number(row.buy_volume),
+      sellVolume: Number(row.sell_volume),
+      matchedVolume: Number(row.matched_volume),
+      createdAt: row.created_at.toISOString(),
+      txHash: row.tx_hash,
+    }));
+  } catch (err) {
+    console.error('Auction history query failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/funding/:marketId',
+  {
+    preHandler: createValidationMiddleware([validateMarketIdParam]),
+  },
+  async (request) => {
   const { marketId } = request.params as { marketId: string };
   const pool = getPool();
   
@@ -503,12 +805,23 @@ async function startOracleKeeper() {
   }, 45_000);
 }
 
-// Initialize database and indexer
+// Load secrets from secrets manager (optional)
+try {
+  await loadSecrets();
+} catch (err) {
+  console.warn('Secrets loading failed (using env vars):', err);
+}
+
+// Initialize database and indexers
 try {
   await initDb();
-  // Start indexer in background (non-blocking)
+  // Start V1 indexer in background (non-blocking)
   startIndexer().catch((err) => {
-    console.error('Indexer error:', err);
+    console.error('V1 Indexer error:', err);
+  });
+  // Start V2 indexer in background (non-blocking)
+  startIndexerV2().catch((err) => {
+    console.error('V2 Indexer error:', err);
   });
 } catch (err) {
   console.warn('Database/indexer initialization failed:', err);
@@ -520,7 +833,7 @@ setInterval(tickMarkets, 3_000);
 await startEventWatchers();
 await startOracleKeeper();
 
-// Start keeper services
+// Start V1 keeper services
 startOrderbookKeeper().catch((err) => {
   console.error('Orderbook Keeper error:', err);
 });
@@ -529,6 +842,23 @@ startLiquidationKeeper().catch((err) => {
 });
 startFundingKeeper().catch((err) => {
   console.error('Funding Keeper error:', err);
+});
+
+// Start V2 keeper services
+startAuctionKeeper().catch((err) => {
+  console.error('Auction Keeper error:', err);
+});
+startStopTriggerKeeper().catch((err) => {
+  console.error('Stop Trigger Keeper error:', err);
+});
+startFundingKeeperV2().catch((err) => {
+  console.error('V2 Funding Keeper error:', err);
+});
+startLiquidationKeeperV2().catch((err) => {
+  console.error('V2 Liquidation Keeper error:', err);
+});
+startOracleRouterKeeper().catch((err) => {
+  console.error('Oracle Router Keeper error:', err);
 });
 
 // Graceful shutdown

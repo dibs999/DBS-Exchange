@@ -28,6 +28,7 @@ interface IPerpEngineV2 {
 contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable {
     uint256 public constant BPS = 10_000;
     uint256 public constant ONE = 1e18;
+    uint256 public constant MAX_FEE_BPS = 100;
 
     enum OrderStatus { None, Live, QueuedForAuction, TriggerPending, Filled, Cancelled }
     enum OrderMode { Continuous, Batch }
@@ -53,6 +54,7 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         OrderMode mode;
         OrderType orderType;
         OrderStatus status;
+        uint256 maxSlippageBps; // Maximum slippage in basis points (0 = no limit)
         uint256 next;
         uint64 createdAt;
         uint64 lastUpdateAt;
@@ -163,8 +165,8 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
     }
 
     function setFees(uint256 makerBps, uint256 takerBps) external onlyOwner {
-        require(makerBps <= BPS, "maker too high");
-        require(takerBps <= BPS, "taker too high");
+        require(makerBps <= MAX_FEE_BPS, "maker too high");
+        require(takerBps <= MAX_FEE_BPS, "taker too high");
         makerFeeBps = makerBps;
         takerFeeBps = takerBps;
         emit FeesUpdated(makerBps, takerBps);
@@ -184,7 +186,8 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         uint256 price,
         OrderMode mode,
         OrderType orderType,
-        uint256 triggerPrice
+        uint256 triggerPrice,
+        uint256 maxSlippageBps
     ) external whenNotPaused returns (uint256) {
         MarketConfig memory cfg = markets[marketId];
         require(cfg.active, "inactive market");
@@ -206,6 +209,9 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
             }
         }
 
+        // Validate slippage (max 10% = 1000 bps)
+        require(maxSlippageBps <= 1000, "Slippage too high");
+        
         uint256 orderId = nextOrderId++;
         orders[orderId] = Order({
             owner: msg.sender,
@@ -216,6 +222,7 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
             mode: mode,
             orderType: orderType,
             status: OrderStatus.Live,
+            maxSlippageBps: maxSlippageBps,
             next: 0,
             createdAt: uint64(block.timestamp),
             lastUpdateAt: uint64(block.timestamp)
@@ -303,6 +310,7 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         if (count == 0) return;
 
         uint256 clearingPrice = _computeClearingPrice(marketId, eligible, count);
+        require(clearingPrice > 0, "clearing=0");
         _validatePrice(cfg, clearingPrice);
 
         (uint256 buyTotal, uint256 sellTotal) = _aggregateAuctionVolumes(marketId, eligible, count, clearingPrice);
@@ -331,7 +339,7 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
             if (fillAbs == 0) continue;
 
             int256 orderFill = order.size > 0 ? int256(fillAbs) : -int256(fillAbs);
-            _settleAuctionFill(orderId, order, orderFill, clearingPrice, true);
+            _settleAuctionFill(orderId, order, orderFill, clearingPrice, true, cfg);
             touched++;
         }
 
@@ -339,7 +347,7 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
             uint256 residualBuy = buyTotal > sellTotal ? buyTotal - sellTotal : 0;
             uint256 residualSell = sellTotal > buyTotal ? sellTotal - buyTotal : 0;
             if (residualBuy > 0 || residualSell > 0) {
-                _fillWithVault(marketId, eligible, count, clearingPrice, residualBuy, residualSell);
+                _fillWithVault(marketId, eligible, count, clearingPrice, residualBuy, residualSell, cfg);
             }
         }
 
@@ -378,13 +386,24 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
                 _settleContinuousFill(orderId, makerId, order, maker, takerFill, makerFill, bestPrice);
 
                 maker.size -= makerFill;
+                maker.lastUpdateAt = uint64(block.timestamp);
                 remaining -= takerFill;
                 level.totalSize -= fillAbs;
 
                 uint256 nextId = maker.next;
+                bool removeMaker = false;
                 if (maker.size == 0) {
                     maker.status = OrderStatus.Filled;
-                    maker.lastUpdateAt = uint64(block.timestamp);
+                    removeMaker = true;
+                } else {
+                    uint256 dust = _clearDust(maker, cfg);
+                    if (dust > 0) {
+                        level.totalSize -= dust;
+                        removeMaker = true;
+                    }
+                }
+
+                if (removeMaker) {
                     level.head = nextId;
                     if (nextId == 0) {
                         level.tail = 0;
@@ -403,6 +422,9 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         }
 
         order.size = remaining;
+        if (_clearDust(order, cfg) > 0) {
+            return;
+        }
         order.lastUpdateAt = uint64(block.timestamp);
         if (remaining == 0) {
             order.status = OrderStatus.Filled;
@@ -418,6 +440,22 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         }
     }
 
+    function _checkSlippage(Order storage order, uint256 executionPrice) internal view {
+        if (order.maxSlippageBps == 0) return; // No slippage limit
+        
+        uint256 expectedPrice = order.price;
+        if (expectedPrice == 0) return; // Market order, no slippage check
+        
+        uint256 slippageBps;
+        if (executionPrice > expectedPrice) {
+            slippageBps = ((executionPrice - expectedPrice) * BPS) / expectedPrice;
+        } else {
+            slippageBps = ((expectedPrice - executionPrice) * BPS) / expectedPrice;
+        }
+        
+        require(slippageBps <= order.maxSlippageBps, "Slippage exceeded");
+    }
+
     function _settleContinuousFill(
         uint256 takerOrderId,
         uint256 makerOrderId,
@@ -427,6 +465,8 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         int256 makerFill,
         uint256 price
     ) internal {
+        // Check slippage for taker order
+        _checkSlippage(taker, price);
         engine.applyTrade(
             IPerpEngineV2.FillSettlement({
                 account: maker.owner,
@@ -457,8 +497,11 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         Order storage order,
         int256 fill,
         uint256 price,
-        bool makerFee
+        bool makerFee,
+        MarketConfig memory cfg
     ) internal {
+        // Check slippage for order
+        _checkSlippage(order, price);
         engine.applyTrade(
             IPerpEngineV2.FillSettlement({
                 account: order.owner,
@@ -474,6 +517,8 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         order.lastUpdateAt = uint64(block.timestamp);
         if (order.size == 0) {
             order.status = OrderStatus.Filled;
+        } else {
+            _clearDust(order, cfg);
         }
         emit OrderMatched(orderId, order.marketId, fill, price, makerFee);
     }
@@ -484,7 +529,8 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         uint256 count,
         uint256 price,
         uint256 residualBuy,
-        uint256 residualSell
+        uint256 residualSell,
+        MarketConfig memory cfg
     ) internal {
         for (uint256 i = 0; i < count; i++) {
             uint256 orderId = eligible[i];
@@ -500,13 +546,13 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
                 residualBuy -= fillAbs;
                 int256 orderFill = int256(fillAbs);
                 int256 vaultFill = -orderFill;
-                _settleVaultFill(orderId, order, orderFill, vaultFill, price);
+                _settleVaultFill(orderId, order, orderFill, vaultFill, price, cfg);
             } else if (order.size < 0 && residualSell > 0) {
                 fillAbs = absSize > residualSell ? residualSell : absSize;
                 residualSell -= fillAbs;
                 int256 orderFill = -int256(fillAbs);
                 int256 vaultFill = -orderFill;
-                _settleVaultFill(orderId, order, orderFill, vaultFill, price);
+                _settleVaultFill(orderId, order, orderFill, vaultFill, price, cfg);
             }
 
             if (residualBuy == 0 && residualSell == 0) break;
@@ -518,8 +564,11 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         Order storage order,
         int256 orderFill,
         int256 vaultFill,
-        uint256 price
+        uint256 price,
+        MarketConfig memory cfg
     ) internal {
+        // Check slippage for order
+        _checkSlippage(order, price);
         engine.applyTrade(
             IPerpEngineV2.FillSettlement({
                 account: vault,
@@ -545,6 +594,8 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
         order.lastUpdateAt = uint64(block.timestamp);
         if (order.size == 0) {
             order.status = OrderStatus.Filled;
+        } else {
+            _clearDust(order, cfg);
         }
 
         emit OrderMatched(orderId, order.marketId, orderFill, price, false);
@@ -747,6 +798,16 @@ contract OrderbookV2 is OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard
             delete bidLevels[marketId][price];
         } else {
             delete askLevels[marketId][price];
+        }
+    }
+
+    function _clearDust(Order storage order, MarketConfig memory cfg) internal returns (uint256 dustAbs) {
+        uint256 absSize = _abs(order.size);
+        if (absSize != 0 && absSize < cfg.minSize) {
+            dustAbs = absSize;
+            order.size = 0;
+            order.status = OrderStatus.Filled;
+            order.lastUpdateAt = uint64(block.timestamp);
         }
     }
 
