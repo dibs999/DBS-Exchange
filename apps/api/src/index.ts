@@ -26,6 +26,7 @@ import {
   validatePaginationQuery,
 } from './middleware/validation.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { getVaultSummary, getVaultAccount, getVaultActivity } from './vault.js';
 
 type PositionState = {
   marketId: string;
@@ -290,60 +291,23 @@ app.get(
       }
     }
 
-    return { bids, asks, auctionState: null }; // Would need to read auction state
-  } catch (err) {
-    console.error('V2 Orderbook query failed:', err);
-    return { bids: [], asks: [], auctionState: null };
+  '/v2/vault/summary',
+  async () => {
+    return await getVaultSummary();
   }
-});
+);
 
 app.get(
-  '/v2/trades/:marketId',
-  {
-    preHandler: createValidationMiddleware([validateMarketIdParam, validatePaginationQuery]),
-  },
-  async (request) => {
-    const { marketId } = request.params as { marketId: string };
-    const pool = getPool();
-  try {
-    const result = await pool.query(
-      `SELECT order_id, maker_address, taker_address, side, size, price, maker_fee, taker_fee, is_maker, created_at
-       FROM v2_trades
-       WHERE market_id = $1
-       ORDER BY created_at DESC
-       LIMIT 100`,
-      [marketId]
-    );
-
-    return result.rows.map((row: any) => ({
-      id: row.order_id?.toString() || '',
-      time: row.created_at.toISOString(),
-      price: Number(row.price),
-      size: Number(row.size),
-      side: row.side,
-      makerFee: row.maker_fee ? Number(row.maker_fee) : null,
-      takerFee: row.taker_fee ? Number(row.taker_fee) : null,
-      isMaker: row.is_maker,
-    }));
-  } catch (err) {
-    console.error('V2 Trades query failed:', err);
-    return [];
-  }
-});
-
-app.get(
-  '/v2/positions/:address',
-  {
+  '/v2/vault/account/:address',
     preHandler: createValidationMiddleware([validateAddressParam]),
-  },
-  async (request) => {
-    const { address } = request.params as { address: string };
+    return await getVaultAccount(address);
+);
 
-  const pool = getPool();
-  try {
-    const result = await pool.query(
-      `SELECT market_id, size, entry_price, funding_entry, opened_at
-       FROM v2_positions
+app.get('/v2/vault/activity', async () => {
+  return await getVaultActivity(undefined, 50);
+  '/v2/vault/activity/:address',
+    return await getVaultActivity(address, 50);
+);
        WHERE address = $1 AND closed_at IS NULL`,
       [address.toLowerCase()]
     );
