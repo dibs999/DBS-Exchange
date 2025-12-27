@@ -33,7 +33,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <WagmiConfig config={wagmiConfig}>
         <I18nProvider>
           <SkipToMain />
-          <App />
+        <App />
         </I18nProvider>
       </WagmiConfig>
     </QueryClientProvider>

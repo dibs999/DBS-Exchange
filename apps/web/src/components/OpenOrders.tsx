@@ -114,27 +114,27 @@ export default function OpenOrders({ data }: { data: Order[] }) {
       {recentOrders.length > 0 && (
         <>
           <p className="muted small" style={{ marginTop: 16, marginBottom: 8 }}>Recent Orders</p>
-          <div className="orders-head">
-            <span>ID</span>
-            <span>Type</span>
-            <span>Side</span>
-            <span>Size</span>
-            <span>Trigger</span>
-            <span>Status</span>
-          </div>
+      <div className="orders-head">
+        <span>ID</span>
+        <span>Type</span>
+        <span>Side</span>
+        <span>Size</span>
+        <span>Trigger</span>
+        <span>Status</span>
+      </div>
           {recentOrders.map((order) => (
-            <div key={order.id} className="orders-row">
-              <span>#{order.id.slice(-6)}</span>
+          <div key={order.id} className="orders-row">
+            <span>#{order.id.slice(-6)}</span>
               <span className="order-type-badge">{order.type}</span>
               <span className={order.side === 'buy' ? 'text-positive' : 'text-negative'}>
                 {order.side.toUpperCase()}
               </span>
-              <span>{formatNumber(order.size, 4)}</span>
-              <span>{order.triggerPrice ? formatUsd(order.triggerPrice, 2) : '--'}</span>
+            <span>{formatNumber(order.size, 4)}</span>
+            <span>{order.triggerPrice ? formatUsd(order.triggerPrice, 2) : '--'}</span>
               <span className={`order-status order-status-${order.status}`}>
                 {order.status}
               </span>
-            </div>
+          </div>
           ))}
         </>
       )}

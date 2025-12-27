@@ -63,8 +63,13 @@ const mockHistoricalTrades: HistoricalTrade[] = [
   },
 ];
 
-export default function TradeHistory() {
-  const { address, isConnected } = useAccount();
+type TradeHistoryProps = {
+  address?: string;
+};
+
+export default function TradeHistory({ address: addressProp }: TradeHistoryProps = {}) {
+  const { address: connectedAddress, isConnected } = useAccount();
+  const address = addressProp || connectedAddress;
   const [trades, setTrades] = useState<HistoricalTrade[]>([]);
   const [loading, setLoading] = useState(false);
 

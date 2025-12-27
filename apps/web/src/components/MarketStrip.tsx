@@ -32,12 +32,12 @@ export default function MarketStrip({ markets, activeId, onSelect }: Props) {
             <div className="market-header">
               <span className="market-symbol">{market.symbol}</span>
               <span className={`market-change ${market.change24h >= 0 ? 'text-positive' : 'text-negative'}`}>
-                {formatPct(market.change24h)}
-              </span>
+              {formatPct(market.change24h)}
+            </span>
             </div>
             <strong className="market-price">{formatUsd(market.markPrice, 2)}</strong>
             <div className="market-stats">
-              <span className="muted small">Vol {formatCompact(market.volume24h)}</span>
+            <span className="muted small">Vol {formatCompact(market.volume24h)}</span>
               <span className="muted small">•</span>
               <span className="muted small">OI {formatCompact(market.openInterest)}</span>
             </div>

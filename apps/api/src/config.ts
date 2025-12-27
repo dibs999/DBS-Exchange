@@ -32,4 +32,12 @@ export const env = {
   corsOrigins: parseCsv(process.env.CORS_ORIGINS),
   rateLimitPerMinute: parseNumber(process.env.RATE_LIMIT_PER_MINUTE, 240),
   priceFeedTimeoutMs: parseNumber(process.env.PRICE_FEED_TIMEOUT_MS, 6_000),
+  // Keeper configuration
+  orderbookKeeperEnabled: process.env.ORDERBOOK_KEEPER_ENABLED !== 'false',
+  orderbookKeeperInterval: parseNumber(process.env.ORDERBOOK_KEEPER_INTERVAL, 10_000),
+  liquidationKeeperEnabled: process.env.LIQUIDATION_KEEPER_ENABLED !== 'false',
+  liquidationKeeperInterval: parseNumber(process.env.LIQUIDATION_KEEPER_INTERVAL, 15_000),
+  fundingKeeperEnabled: process.env.FUNDING_KEEPER_ENABLED !== 'false',
+  fundingKeeperInterval: parseNumber(process.env.FUNDING_KEEPER_INTERVAL, 3_600_000), // 1 hour
+  maxFundingRate: parseNumber(process.env.MAX_FUNDING_RATE, 0.0001), // 0.01% per hour max
 };

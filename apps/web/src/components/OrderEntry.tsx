@@ -185,7 +185,7 @@ export default function OrderEntry({ marketId, markPrice, prefill }: OrderEntryP
 
     setLoading(true);
     try {
-      const leverageValue = Number(leverage);
+    const leverageValue = Number(leverage);
       const sizeUnits = parseUnits(size, 18);
       const signedSize = side === 'short' ? -sizeUnits : sizeUnits;
 

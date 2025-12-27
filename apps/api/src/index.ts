@@ -9,6 +9,9 @@ import { appendTrade, bumpMarket, getOrders, seedMarkets, state, updateOrderStat
 import { Market, Order, Orderbook, Position, PriceFeed, Trade, WsMessage } from '@dbs/shared';
 import { initDb, getPool, closeDb } from './db/index.js';
 import { startIndexer } from './indexer.js';
+import { startOrderbookKeeper } from './keepers/orderbookKeeper.js';
+import { startLiquidationKeeper } from './keepers/liquidationKeeper.js';
+import { startFundingKeeper } from './keepers/fundingKeeper.js';
 
 type PositionState = {
   marketId: string;
@@ -516,6 +519,17 @@ setInterval(tickMarkets, 3_000);
 
 await startEventWatchers();
 await startOracleKeeper();
+
+// Start keeper services
+startOrderbookKeeper().catch((err) => {
+  console.error('Orderbook Keeper error:', err);
+});
+startLiquidationKeeper().catch((err) => {
+  console.error('Liquidation Keeper error:', err);
+});
+startFundingKeeper().catch((err) => {
+  console.error('Funding Keeper error:', err);
+});
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

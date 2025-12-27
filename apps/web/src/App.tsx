@@ -16,6 +16,7 @@ import FaucetModal from './components/FaucetModal';
 import TradeHistory from './components/TradeHistory';
 import FundingChart from './components/FundingChart';
 import LPVault from './components/LPVault';
+import PortfolioAnalytics from './components/PortfolioAnalytics';
 import SettingsModal from './components/SettingsModal';
 import NetworkBanner from './components/NetworkBanner';
 import OnboardingModal from './components/OnboardingModal';
@@ -200,120 +201,63 @@ export default function App() {
         </header>
 
         <main>
-          <section className="hero">
-            <div className="hero-left">
-              <div className="hero-topline">
-                <span className="pill neon">DBS Exchange</span>
-                <span className="pill outline">Sepolia</span>
-                <span className={`pill status-pill ${isWsConnected ? 'positive' : 'negative'}`}>
-                  <span className="pulse-dot" aria-hidden />
-                  {isWsConnected ? 'Live-Orderbuch' : 'Snapshot-Ansicht'}
-                </span>
-              </div>
-              <p className="eyebrow">Welcome to the vault</p>
-              <h1>Willkommen bei Obsidian Drift</h1>
-              <p className="hero-lead">{greetingLine}</p>
-              <div className="hero-actions">
-                <button className="btn primary" onClick={() => document.getElementById('terminal')?.scrollIntoView({ behavior: 'smooth' })}>
-                  Zum Terminal
-                </button>
-                <button className="btn secondary" onClick={() => setFaucetModalOpen(true)}>
-                  Testnet-Faucet
-                </button>
-                <button className="btn ghost" onClick={() => setDepositModalOpen(true)} disabled={!isConnected}>
-                  Collateral einzahlen
-                </button>
-              </div>
-              <div className="hero-badges">
-                <span className="pill outline">TradingView integriert</span>
-                <span className="pill outline">Cross-Margin Engine</span>
-                <span className="pill outline">WalletConnect ready</span>
-              </div>
-              <div className="hero-metrics">
-                <div className="metric highlight">
-                  <p className="label">Wallet</p>
-                  <strong>{isConnected ? 'Verbunden' : 'Nicht verbunden'}</strong>
-                  <p className="muted small">{isConnected ? shortAddress : 'MetaMask & WalletConnect werden unterstützt.'}</p>
+          {/* Market Overview Header - Hyperliquid Style */}
+          <section className="market-overview">
+            <div className="market-header">
+              <div className="market-title">
+                <h1 className="market-symbol">{activeMarket?.symbol ?? 'ETH/USD'}</h1>
+                <div className="market-subtitle">
+                  <span className={`price-change ${priceHeadline.change >= 0 ? 'positive' : 'negative'}`}>
+                    {formatPct(priceHeadline.change)}
+                  </span>
+                  <span className="muted small">24h</span>
                 </div>
-                {heroStats.map((stat, idx) => (
-                  <div key={stat.label} className="metric" style={{ ['--delay' as string]: `${idx * 0.08}s` }}>
-                    <p className="label">{stat.label}</p>
-                    <strong>{stat.value}</strong>
-                  </div>
-                ))}
               </div>
-            </div>
-            <div className="hero-right">
-              <div className="hero-glow" />
-              <div className="hero-card price-card">
-                <div className="hero-card-head">
-                  <div>
-                    <p className="label">ETH index</p>
-                    <h2>{priceHeadline.price}</h2>
-                  </div>
-                  <span className={`pill ${priceHeadline.change >= 0 ? 'pill-up' : 'pill-down'}`}>
-                    {priceHeadline.change >= 0 ? 'Bullish' : 'Cooling'}
+              <div className="market-price">
+                <div className="price-main">{priceHeadline.price}</div>
+                <div className="price-details">
+                  <span className="muted small">Mark: {activeMarket ? formatUsd(activeMarket.markPrice, 2) : '--'}</span>
+                  <span className="muted small">Index: {activeMarket ? formatUsd(activeMarket.indexPrice, 2) : '--'}</span>
+                </div>
+              </div>
+              <div className="market-stats">
+                <div className="stat-item">
+                  <span className="stat-label">24h Volume</span>
+                  <span className="stat-value">{activeMarket ? formatCompact(activeMarket.volume24h) : '--'}</span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label">Open Interest</span>
+                  <span className="stat-value">{activeMarket ? formatCompact(activeMarket.openInterest) : '--'}</span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label">Funding (1h)</span>
+                  <span className={`stat-value ${activeMarket && activeMarket.fundingRate < 0 ? 'negative' : 'positive'}`}>
+                    {activeMarket ? formatPct(activeMarket.fundingRate * 100) : '--'}
                   </span>
                 </div>
-                <div className="price-row">
-                  <div>
-                    <p className="muted small">Mark</p>
-                    <strong>{activeMarket ? formatUsd(activeMarket.markPrice, 2) : '--'}</strong>
-                  </div>
-                  <div>
-                    <p className="muted small">Index</p>
-                    <strong>{activeMarket ? formatUsd(activeMarket.indexPrice, 2) : '--'}</strong>
-                  </div>
-                  <div className={`change-chip ${priceHeadline.change >= 0 ? 'positive' : 'negative'}`}>
-                    {formatPct(priceHeadline.change)}
-                  </div>
-                </div>
-                <div className="hero-card-divider" />
-                <div className="hero-card-foot">
-                  <div>
-                    <p className="label">Collateral token</p>
-                    <h3>oUSD</h3>
-                    <p className="muted small">Minted for Sepolia testing.</p>
-                  </div>
-                  <div className="pill ghost">Latency tuned</div>
+                <div className="stat-item">
+                  <span className="stat-label">Spread</span>
+                  <span className="stat-value">{formatUsd(spreadStats.abs, 2)} ({formatPct(spreadStats.pct)})</span>
                 </div>
               </div>
-              <div className="hero-card connect-card" id="connect-card">
-                <div className="connect-card-head">
-                  <div>
-                    <p className="label">Sofort loslegen</p>
-                    <h3>Verbinde dein Wallet hier im Hero.</h3>
+              <div className="market-actions">
+                <span className={`status-indicator ${isWsConnected ? 'live' : 'offline'}`}>
+                  <span className="pulse-dot" aria-hidden />
+                  {isWsConnected ? 'Live' : 'Offline'}
+                </span>
+                {!isConnected && (
+                  <div className="wallet-prompt">
+                    <WalletButton />
                   </div>
-                  <span className="pill ghost">{isConnected ? 'Bereit' : 'One-tap'}</span>
-                </div>
-                <p className="muted small">
-                  Wir begrüßen dich mit einem aufgeräumten, echten Exchange-Gefühl – inklusive WalletConnect-Unterstützung und direktem Zugriff auf das Orderbuch.
-                </p>
-                <div className="wallet-connect-inline">
-                  <WalletButton />
-                </div>
-                <div className="connect-foot">
-                  <span className="pill outline">oUSD Collateral</span>
-                  <span className="pill outline">Cross-Margin</span>
-                  <span className="pill outline">Funding synced</span>
-                </div>
-              </div>
-              <div className="hero-cta">
-                <p className="eyebrow">Liquidity vault</p>
-                <h3>Seed a liquidity vault and earn protocol yield.</h3>
-                <button className="btn secondary" onClick={() => document.getElementById('liquidity')?.scrollIntoView({ behavior: 'smooth' })}>
-                  Deposit liquidity
-                </button>
+                )}
               </div>
             </div>
           </section>
 
-          <section className="section" id="markets">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Market heat</p>
-                <h2>Cross-asset markets</h2>
-              </div>
+          {/* Markets Section - Compact */}
+          <section className="markets-section" id="markets">
+            <div className="markets-header">
+              <h2>Markets</h2>
               {status ? <p className="status warn">{status}</p> : null}
             </div>
             {isLoadingSnapshot ? (
@@ -333,45 +277,93 @@ export default function App() {
             ))}
           </section>
 
+          {/* Trading Terminal - 3 Column Layout */}
           <section className="terminal" id="terminal">
-            <div className="terminal-head">
-              <div>
-                <p className="eyebrow">Perpetuals terminal</p>
-                <h2>{activeMarket?.symbol ?? 'ETH/USD'}</h2>
-                <p className="muted">Mark {activeMarket ? formatUsd(activeMarket.markPrice, 2) : '--'} / Index {activeMarket ? formatUsd(activeMarket.indexPrice, 2) : '--'}</p>
-                <div className="terminal-tags">
-                  <span className="pill outline">Cross-margin</span>
-                  <span className="pill outline">Low latency</span>
-                  <span className="pill outline">Oracle synced</span>
+            <div className="terminal-layout">
+              {/* Left Column: Orderbook & Trades */}
+              <div className="terminal-left">
+                {isLoadingSnapshot ? (
+                  <OrderbookSkeleton />
+                ) : (
+                  <OrderBook 
+                    data={orderbook} 
+                    onPriceClick={(price, side) => {
+                      setTicketPrefill({ price, side, key: Date.now() });
+                    }}
+                  />
+                )}
+                <Trades data={trades} />
+              </div>
+
+              {/* Center Column: Chart & Order Entry */}
+              <div className="terminal-center">
+                <div className="chart-container">
+                  <TradingViewChart symbol={activeMarket?.symbol ?? 'ETHUSD'} />
+                </div>
+                <div className="order-entry-container">
+                  <OrderEntry 
+                    marketId={activeMarketId}
+                    markPrice={activeMarket?.markPrice ?? 0}
+                    prefill={ticketPrefill}
+                  />
                 </div>
               </div>
-              <div className="terminal-actions">
-                <button className="btn ghost" onClick={() => setFaucetModalOpen(true)}>Faucet</button>
-                <button className="btn secondary" onClick={() => setWithdrawModalOpen(true)}>Withdraw</button>
-                <button className="btn primary" onClick={() => setDepositModalOpen(true)}>Deposit</button>
+
+              {/* Right Column: Positions, Orders, Account */}
+              <div className="terminal-right">
+                {isConnected && address ? (
+                  <>
+                    <AccountPanel 
+                      positions={positions}
+                      onDeposit={() => setDepositModalOpen(true)}
+                      onWithdraw={() => setWithdrawModalOpen(true)}
+                      onFaucet={() => setFaucetModalOpen(true)}
+                    />
+                    <div className="terminal-tabs">
+                      <button 
+                        className={`tab ${terminalTab === 'positions' ? 'active' : ''}`}
+                        onClick={() => setTerminalTab('positions')}
+                      >
+                        Positions
+                      </button>
+                      <button 
+                        className={`tab ${terminalTab === 'orders' ? 'active' : ''}`}
+                        onClick={() => setTerminalTab('orders')}
+                      >
+                        Orders
+                      </button>
+                      <button 
+                        className={`tab ${terminalTab === 'history' ? 'active' : ''}`}
+                        onClick={() => setTerminalTab('history')}
+                      >
+                        History
+                      </button>
+                    </div>
+                    <div className="terminal-content">
+                      {terminalTab === 'positions' && (
+                        isLoadingSnapshot ? <PositionsSkeleton /> : <Positions data={positions} />
+                      )}
+                      {terminalTab === 'orders' && (
+                        <OpenOrders data={orders} />
+                      )}
+                      {terminalTab === 'history' && (
+                        <TradeHistory address={address} />
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="connect-prompt">
+                    <h3>Connect Wallet</h3>
+                    <p className="muted">Connect your wallet to start trading</p>
+                    <WalletButton />
+                  </div>
+                )}
               </div>
             </div>
+          </section>
 
-            <div className="terminal-meta">
-              <div>
-                <p className="label">Spread</p>
-                <strong>{formatUsd(spreadStats.abs, 2)} <span className="muted small">({formatPct(spreadStats.pct)})</span></strong>
-              </div>
-              <div>
-                <p className="label">Open interest</p>
-                <strong>{activeMarket ? formatCompact(activeMarket.openInterest) : '--'}</strong>
-              </div>
-              <div>
-                <p className="label">Funding (1h)</p>
-                <strong>{activeMarket ? formatPct(activeMarket.fundingRate * 100) : '--'}</strong>
-              </div>
-              <div>
-                <p className="label">24h Volume</p>
-                <strong>{activeMarket ? formatCompact(activeMarket.volume24h) : '--'}</strong>
-              </div>
-            </div>
-
-            <div className="terminal-grid">
+          {/* Legacy Grid Layout (fallback) */}
+          <div className="terminal-grid" style={{ display: 'none' }}>
               <div className="chart-column">
                 <div className="chart-panel">
                   <TradingViewChart symbol={activeMarket?.tvSymbol ?? 'BINANCE:ETHUSDT'} />

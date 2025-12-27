@@ -94,6 +94,62 @@ export const ENGINE_ABI = [
       { name: 'cumulativeFundingRate', type: 'int256', indexed: false },
     ],
   },
+  {
+    type: 'function',
+    name: 'getPosition',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'marketId', type: 'bytes32' },
+    ],
+    outputs: [
+      {
+        components: [
+          { name: 'size', type: 'int256' },
+          { name: 'entryPrice', type: 'uint256' },
+          { name: 'margin', type: 'uint256' },
+          { name: 'fundingEntry', type: 'int256' },
+        ],
+        name: 'position',
+        type: 'tuple',
+      },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'markets',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'bytes32' }],
+    outputs: [
+      { name: 'isActive', type: 'bool' },
+      { name: 'initialMarginBps', type: 'uint256' },
+      { name: 'maintenanceMarginBps', type: 'uint256' },
+      { name: 'maxLeverage', type: 'uint256' },
+      { name: 'cumulativeFundingRate', type: 'int256' },
+      { name: 'fundingRatePerSecond', type: 'int256' },
+      { name: 'lastFundingTime', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'liquidate',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'marketId', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'setFundingRate',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'marketId', type: 'bytes32' },
+      { name: 'ratePerSecond', type: 'int256' },
+    ],
+    outputs: [],
+  },
 ] as const;
 
 export const ORDERBOOK_ABI = [
@@ -129,5 +185,36 @@ export const ORDERBOOK_ABI = [
       { name: 'sizeDelta', type: 'int256', indexed: false },
       { name: 'executionPrice', type: 'uint256', indexed: false },
     ],
+  },
+  {
+    type: 'function',
+    name: 'nextOrderId',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'orders',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'marketId', type: 'bytes32' },
+      { name: 'sizeDelta', type: 'int256' },
+      { name: 'leverage', type: 'uint256' },
+      { name: 'triggerPrice', type: 'uint256' },
+      { name: 'isStop', type: 'bool' },
+      { name: 'reduceOnly', type: 'bool' },
+      { name: 'active', type: 'bool' },
+      { name: 'createdAt', type: 'uint64' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'executeOrder',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'orderId', type: 'uint256' }],
+    outputs: [],
   },
 ] as const;

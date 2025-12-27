@@ -7,6 +7,7 @@ import { ENGINE_ABI, ENGINE_ADDRESS, ENGINE_READY } from '../contracts';
 import { useToast } from './Toast';
 import ConfirmDialog from './ConfirmDialog';
 import { useSettings } from '../lib/settings';
+import { useLiquidationPrice } from '../hooks/useLiquidationPrice';
 
 type PositionsProps = {
   data: Position[];
@@ -85,7 +86,7 @@ export default function Positions({ data }: PositionsProps) {
               {formatUsd(data.reduce((s, p) => s + p.pnl, 0), 2)}
             </span>
           )}
-          <button className="chip ghost">Live</button>
+        <button className="chip ghost">Live</button>
         </div>
       </div>
 
@@ -102,23 +103,34 @@ export default function Positions({ data }: PositionsProps) {
       {data.length === 0 ? (
         <p className="muted small">No open positions yet.</p>
       ) : (
-        data.map((pos) => (
-          <div key={pos.id} className="position-item">
+        data.map((pos) => {
+          const liquidation = useLiquidationPrice(pos, pos.markPrice);
+          const warningClass = liquidation.warning === 'red' ? 'liquidation-warning-red' :
+                               liquidation.warning === 'orange' ? 'liquidation-warning-orange' :
+                               liquidation.warning === 'yellow' ? 'liquidation-warning-yellow' : '';
+          
+          return (
+          <div key={pos.id} className={`position-item ${warningClass}`}>
             <div 
               className="positions-row"
               onClick={() => setExpandedId(expandedId === pos.id ? null : pos.id)}
             >
-              <span>{pos.marketId}</span>
+            <span>{pos.marketId}</span>
               <span className={pos.side === 'long' ? 'text-positive' : 'text-negative'}>
                 {pos.side.toUpperCase()}
               </span>
-              <span>{formatNumber(pos.size, 4)}</span>
-              <span>{formatUsd(pos.entryPrice, 2)}</span>
-              <span>{formatUsd(pos.markPrice, 2)}</span>
-              <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
+            <span>{formatNumber(pos.size, 4)}</span>
+            <span>{formatUsd(pos.entryPrice, 2)}</span>
+            <span>{formatUsd(pos.markPrice, 2)}</span>
+            <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
                 {pos.pnl >= 0 ? '+' : ''}{formatUsd(pos.pnl, 2)}
               </span>
               <span className="position-actions-cell">
+                {liquidation.warning !== 'none' && (
+                  <span className={`liquidation-badge ${liquidation.warning}`} title={`${liquidation.distance?.toFixed(2)}% from liquidation`}>
+                    ⚠️
+                  </span>
+                )}
                 <button
                   className="btn-close-position"
                   onClick={(e) => {
@@ -135,6 +147,17 @@ export default function Positions({ data }: PositionsProps) {
 
             {expandedId === pos.id && (
               <div className="position-details">
+                {liquidation.warning !== 'none' && (
+                  <div className={`liquidation-alert ${liquidation.warning}`}>
+                    <strong>⚠️ Liquidation Warning</strong>
+                    <p className="muted small">
+                      Position is {liquidation.distance?.toFixed(2)}% away from liquidation price.
+                      {liquidation.warning === 'red' && ' Consider closing or adding margin immediately.'}
+                      {liquidation.warning === 'orange' && ' Consider reducing position size or adding margin.'}
+                      {liquidation.warning === 'yellow' && ' Monitor closely.'}
+                    </p>
+                  </div>
+                )}
                 <div className="detail-row">
                   <span className="label">Leverage</span>
                   <span>{pos.leverage}x</span>
@@ -145,7 +168,12 @@ export default function Positions({ data }: PositionsProps) {
                 </div>
                 <div className="detail-row">
                   <span className="label">Liquidation Price</span>
-                  <span className="text-negative">{formatUsd(pos.liquidationPrice, 2)}</span>
+                  <span className={`text-negative ${liquidation.warning !== 'none' ? `liquidation-price-${liquidation.warning}` : ''}`}>
+                    {liquidation.price ? formatUsd(liquidation.price, 2) : formatUsd(pos.liquidationPrice, 2)}
+                    {liquidation.distance !== null && (
+                      <span className="muted small"> ({liquidation.distance.toFixed(2)}% away)</span>
+                    )}
+                  </span>
                 </div>
                 <div className="detail-row">
                   <span className="label">Notional</span>
@@ -155,7 +183,7 @@ export default function Positions({ data }: PositionsProps) {
                   <span className="label">ROE</span>
                   <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
                     {pos.margin > 0 ? ((pos.pnl / pos.margin) * 100).toFixed(2) : 0}%
-                  </span>
+            </span>
                 </div>
                 
                 <div className="position-actions">

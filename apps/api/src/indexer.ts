@@ -8,6 +8,7 @@ const ENGINE_ABI = [
   parseAbiItem('event PositionClosed(address indexed account, bytes32 indexed marketId, int256 size, uint256 exitPrice, int256 pnl)'),
   parseAbiItem('event PositionUpdated(address indexed account, bytes32 indexed marketId, int256 size, uint256 entryPrice, uint256 margin, int256 realizedPnl)'),
   parseAbiItem('event Liquidated(address indexed account, address indexed liquidator, bytes32 indexed marketId, int256 size, uint256 exitPrice, int256 pnl, uint256 penalty)'),
+  parseAbiItem('event FundingRateUpdated(bytes32 indexed marketId, int256 ratePerSecond, int256 cumulativeFundingRate)'),
 ];
 
 const ORDERBOOK_ABI = [
@@ -94,9 +95,53 @@ export async function startIndexer() {
         }
       },
     });
+
+    client.watchContractEvent({
+      address: env.engineAddress as `0x${string}`,
+      abi: ENGINE_ABI,
+      eventName: 'PositionUpdated',
+      onLogs: async (logs) => {
+        for (const log of logs) {
+          await indexPositionUpdated(pool, log);
+        }
+      },
+    });
+
+    client.watchContractEvent({
+      address: env.engineAddress as `0x${string}`,
+      abi: ENGINE_ABI,
+      eventName: 'Liquidated',
+      onLogs: async (logs) => {
+        for (const log of logs) {
+          await indexLiquidated(pool, log);
+        }
+      },
+    });
+
+    client.watchContractEvent({
+      address: env.engineAddress as `0x${string}`,
+      abi: ENGINE_ABI,
+      eventName: 'FundingRateUpdated',
+      onLogs: async (logs) => {
+        for (const log of logs) {
+          await indexFundingRateUpdated(pool, log);
+        }
+      },
+    });
   }
 
   if (env.orderbookAddress) {
+    client.watchContractEvent({
+      address: env.orderbookAddress as `0x${string}`,
+      abi: ORDERBOOK_ABI,
+      eventName: 'OrderCreated',
+      onLogs: async (logs) => {
+        for (const log of logs) {
+          await indexOrderCreated(pool, log);
+        }
+      },
+    });
+
     client.watchContractEvent({
       address: env.orderbookAddress as `0x${string}`,
       abi: ORDERBOOK_ABI,
@@ -104,6 +149,17 @@ export async function startIndexer() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexOrderExecuted(pool, log);
+        }
+      },
+    });
+
+    client.watchContractEvent({
+      address: env.orderbookAddress as `0x${string}`,
+      abi: ORDERBOOK_ABI,
+      eventName: 'OrderCancelled',
+      onLogs: async (logs) => {
+        for (const log of logs) {
+          await indexOrderCancelled(pool, log);
         }
       },
     });
@@ -140,17 +196,73 @@ async function updateLastProcessedBlock(pool: any, blockNumber: bigint) {
 }
 
 async function indexBlockRange(client: any, pool: any, fromBlock: bigint, toBlock: bigint) {
-  // Index PositionOpened events
+  // Index all events in batch
   if (env.engineAddress) {
-    const positionLogs = await client.getLogs({
-      address: env.engineAddress as `0x${string}`,
-      event: parseAbiItem('event PositionOpened(address indexed account, bytes32 indexed marketId, int256 size, uint256 entryPrice, uint256 margin)'),
-      fromBlock,
-      toBlock,
-    });
-    for (const log of positionLogs) {
-      await indexPositionOpened(pool, log);
-    }
+    const [positionOpenedLogs, positionClosedLogs, positionUpdatedLogs, liquidatedLogs, fundingLogs] = await Promise.all([
+      client.getLogs({
+        address: env.engineAddress as `0x${string}`,
+        event: parseAbiItem('event PositionOpened(address indexed account, bytes32 indexed marketId, int256 size, uint256 entryPrice, uint256 margin)'),
+        fromBlock,
+        toBlock,
+      }),
+      client.getLogs({
+        address: env.engineAddress as `0x${string}`,
+        event: parseAbiItem('event PositionClosed(address indexed account, bytes32 indexed marketId, int256 size, uint256 exitPrice, int256 pnl)'),
+        fromBlock,
+        toBlock,
+      }),
+      client.getLogs({
+        address: env.engineAddress as `0x${string}`,
+        event: parseAbiItem('event PositionUpdated(address indexed account, bytes32 indexed marketId, int256 size, uint256 entryPrice, uint256 margin, int256 realizedPnl)'),
+        fromBlock,
+        toBlock,
+      }),
+      client.getLogs({
+        address: env.engineAddress as `0x${string}`,
+        event: parseAbiItem('event Liquidated(address indexed account, address indexed liquidator, bytes32 indexed marketId, int256 size, uint256 exitPrice, int256 pnl, uint256 penalty)'),
+        fromBlock,
+        toBlock,
+      }),
+      client.getLogs({
+        address: env.engineAddress as `0x${string}`,
+        event: parseAbiItem('event FundingRateUpdated(bytes32 indexed marketId, int256 ratePerSecond, int256 cumulativeFundingRate)'),
+        fromBlock,
+        toBlock,
+      }),
+    ]);
+
+    for (const log of positionOpenedLogs) await indexPositionOpened(pool, log);
+    for (const log of positionClosedLogs) await indexPositionClosed(pool, log);
+    for (const log of positionUpdatedLogs) await indexPositionUpdated(pool, log);
+    for (const log of liquidatedLogs) await indexLiquidated(pool, log);
+    for (const log of fundingLogs) await indexFundingRateUpdated(pool, log);
+  }
+
+  if (env.orderbookAddress) {
+    const [orderCreatedLogs, orderExecutedLogs, orderCancelledLogs] = await Promise.all([
+      client.getLogs({
+        address: env.orderbookAddress as `0x${string}`,
+        event: parseAbiItem('event OrderCreated(uint256 indexed orderId, address indexed owner, bytes32 indexed marketId, int256 sizeDelta, uint256 leverage, uint256 triggerPrice, bool isStop, bool reduceOnly)'),
+        fromBlock,
+        toBlock,
+      }),
+      client.getLogs({
+        address: env.orderbookAddress as `0x${string}`,
+        event: parseAbiItem('event OrderExecuted(uint256 indexed orderId, address indexed owner, bytes32 indexed marketId, int256 sizeDelta, uint256 executionPrice)'),
+        fromBlock,
+        toBlock,
+      }),
+      client.getLogs({
+        address: env.orderbookAddress as `0x${string}`,
+        event: parseAbiItem('event OrderCancelled(uint256 indexed orderId, address indexed owner)'),
+        fromBlock,
+        toBlock,
+      }),
+    ]);
+
+    for (const log of orderCreatedLogs) await indexOrderCreated(pool, log);
+    for (const log of orderExecutedLogs) await indexOrderExecuted(pool, log);
+    for (const log of orderCancelledLogs) await indexOrderCancelled(pool, log);
   }
 }
 
@@ -214,10 +326,95 @@ async function indexOrderExecuted(pool: any, log: any) {
   );
 }
 
-async function indexPriceUpdate(pool: any, log: any) {
+async function indexPositionUpdated(pool: any, log: any) {
+  const marketId = hexToString(log.args.marketId as `0x${string}`, { size: 32 }).replace(/\0/g, '');
+  const size = Number(formatUnits(log.args.size as bigint, 18));
+  
+  // Update the most recent open position
+  await pool.query(
+    `UPDATE positions_history 
+     SET size = $1, entry_price = $2, margin = $3
+     WHERE address = $4 AND market_id = $5 AND closed_at IS NULL
+     ORDER BY opened_at DESC LIMIT 1`,
+    [
+      Math.abs(size),
+      Number(formatUnits(log.args.entryPrice as bigint, 18)),
+      Number(formatUnits(log.args.margin as bigint, 18)),
+      log.args.account,
+      marketId,
+    ]
+  );
+}
+
+async function indexLiquidated(pool: any, log: any) {
   const marketId = hexToString(log.args.marketId as `0x${string}`, { size: 32 }).replace(/\0/g, '');
   
-  // Store funding rate if available (would need FundingRateUpdated event)
-  // For now, just log price updates
+  // Mark position as liquidated
+  await pool.query(
+    `UPDATE positions_history 
+     SET closed_at = NOW(), exit_price = $1, pnl = $2, tx_hash_close = $3
+     WHERE address = $4 AND market_id = $5 AND closed_at IS NULL
+     ORDER BY opened_at DESC LIMIT 1`,
+    [
+      Number(formatUnits(log.args.exitPrice as bigint, 18)),
+      Number(formatUnits(log.args.pnl as bigint, 18)),
+      log.transactionHash,
+      log.args.account,
+      marketId,
+    ]
+  );
+}
+
+async function indexFundingRateUpdated(pool: any, log: any) {
+  const marketId = hexToString(log.args.marketId as `0x${string}`, { size: 32 }).replace(/\0/g, '');
+  
+  await pool.query(
+    `INSERT INTO funding_history (market_id, rate, cumulative_rate, block_number)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT DO NOTHING`,
+    [
+      marketId,
+      Number(formatUnits(log.args.ratePerSecond as bigint, 18)),
+      Number(formatUnits(log.args.cumulativeFundingRate as bigint, 18)),
+      Number(log.blockNumber),
+    ]
+  );
+}
+
+async function indexOrderCreated(pool: any, log: any) {
+  const marketId = hexToString(log.args.marketId as `0x${string}`, { size: 32 }).replace(/\0/g, '');
+  const size = Number(formatUnits(log.args.sizeDelta as bigint, 18));
+  
+  await pool.query(
+    `INSERT INTO orders_history (order_id, address, market_id, side, type, size, trigger_price, leverage, status, created_at, tx_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
+     ON CONFLICT (order_id) DO UPDATE SET status = $9`,
+    [
+      log.args.orderId.toString(),
+      log.args.owner,
+      marketId,
+      size >= 0 ? 'buy' : 'sell',
+      log.args.triggerPrice > 0n ? (log.args.isStop ? 'stop' : 'limit') : 'market',
+      Math.abs(size),
+      log.args.triggerPrice > 0n ? Number(formatUnits(log.args.triggerPrice, 18)) : null,
+      Number(log.args.leverage),
+      'open',
+      log.transactionHash,
+    ]
+  );
+}
+
+async function indexOrderCancelled(pool: any, log: any) {
+  await pool.query(
+    `UPDATE orders_history 
+     SET status = 'cancelled', cancelled_at = NOW()
+     WHERE order_id = $1`,
+    [log.args.orderId.toString()]
+  );
+}
+
+async function indexPriceUpdate(pool: any, log: any) {
+  // Price updates are logged but not stored in a separate table
+  // They're used for real-time price feeds
 }
 
