@@ -47,10 +47,18 @@ export default function App() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const [activeMarketId, setActiveMarketId] = useState(MARKET_ID_STRING);
-  const { markets, activeMarket, orderbook, trades, positions, orders, prices, status, isLoadingSnapshot } = useMarketData(
-    activeMarketId,
-    address
-  );
+  const {
+    markets,
+    activeMarket,
+    orderbook,
+    trades,
+    positions,
+    orders,
+    prices,
+    status,
+    isLoadingSnapshot,
+    isWsConnected,
+  } = useMarketData(activeMarketId, address);
 
   // Modal states
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -123,18 +131,31 @@ export default function App() {
     };
   }, [prices, activeMarket]);
 
+  const spreadStats = useMemo(() => {
+    if (!activeMarket?.indexPrice) {
+      return { abs: 0, pct: 0 };
+    }
+    const abs = (activeMarket.markPrice ?? 0) - activeMarket.indexPrice;
+    const pct = (abs / activeMarket.indexPrice) * 100;
+    return { abs, pct };
+  }, [activeMarket]);
+
   return (
     <ToastProvider>
       <SettingsProvider>
         <div className="app">
+        <div className="grid-overlay" aria-hidden="true" />
         <NetworkBanner />
         
         <header className="topbar">
           <div className="brand">
             <span className="brand-dot" />
-            <div>
-              <p className="brand-title">Obsidian Drift</p>
-              <p className="muted small">DEX - Perps Engine</p>
+            <div className="brand-copy">
+              <div className="brand-row">
+                <p className="brand-title">Obsidian Drift</p>
+                <span className="pill subtle">Hyperliquid-inspired</span>
+              </div>
+              <p className="muted small">Sepolia perps lab</p>
             </div>
           </div>
           <nav className="nav">
@@ -144,6 +165,10 @@ export default function App() {
             <a href="#risk" aria-label={t('nav.risk')}>{t('nav.risk')}</a>
           </nav>
           <div className="nav-actions">
+            <span className={`pill status-pill ${isWsConnected ? 'positive' : 'negative'}`}>
+              <span className="pulse-dot" aria-hidden />
+              {isWsConnected ? 'Live feed' : 'Cached view'}
+            </span>
             <button 
               className="btn ghost" 
               onClick={() => setSettingsOpen(true)} 
@@ -173,6 +198,11 @@ export default function App() {
                 Trade in the dark,
                 <span> settle in gold.</span>
               </h1>
+              <div className="hero-badges">
+                <span className="pill neon">CLOB perps</span>
+                <span className="pill outline">Unified margin</span>
+                <span className="pill outline">Oracle indexed</span>
+              </div>
               <p className="muted">
                 Obsidian Drift is a modular perps exchange with on-chain margin, oracle-indexed pricing, and
                 streamlined risk controls. Built for rapid experimentation on Sepolia.
@@ -194,19 +224,37 @@ export default function App() {
             </div>
             <div className="hero-right">
               <div className="hero-glow" />
-              <div className="hero-card">
-                <div>
-                  <p className="label">ETH index</p>
-                  <h2>{priceHeadline.price}</h2>
-                  <span className={priceHeadline.change >= 0 ? 'text-positive' : 'text-negative'}>
-                    {formatPct(priceHeadline.change)}
+              <div className="hero-card price-card">
+                <div className="hero-card-head">
+                  <div>
+                    <p className="label">ETH index</p>
+                    <h2>{priceHeadline.price}</h2>
+                  </div>
+                  <span className={`pill ${priceHeadline.change >= 0 ? 'pill-up' : 'pill-down'}`}>
+                    {priceHeadline.change >= 0 ? 'Bullish' : 'Cooling'}
                   </span>
                 </div>
+                <div className="price-row">
+                  <div>
+                    <p className="muted small">Mark</p>
+                    <strong>{activeMarket ? formatUsd(activeMarket.markPrice, 2) : '--'}</strong>
+                  </div>
+                  <div>
+                    <p className="muted small">Index</p>
+                    <strong>{activeMarket ? formatUsd(activeMarket.indexPrice, 2) : '--'}</strong>
+                  </div>
+                  <div className={`change-chip ${priceHeadline.change >= 0 ? 'positive' : 'negative'}`}>
+                    {formatPct(priceHeadline.change)}
+                  </div>
+                </div>
                 <div className="hero-card-divider" />
-                <div>
-                  <p className="label">Collateral token</p>
-                  <h3>oUSD</h3>
-                  <p className="muted small">Minted for Sepolia testing.</p>
+                <div className="hero-card-foot">
+                  <div>
+                    <p className="label">Collateral token</p>
+                    <h3>oUSD</h3>
+                    <p className="muted small">Minted for Sepolia testing.</p>
+                  </div>
+                  <div className="pill ghost">Latency tuned</div>
                 </div>
               </div>
               <div className="hero-cta">
@@ -250,11 +298,35 @@ export default function App() {
                 <p className="eyebrow">Perpetuals terminal</p>
                 <h2>{activeMarket?.symbol ?? 'ETH/USD'}</h2>
                 <p className="muted">Mark {activeMarket ? formatUsd(activeMarket.markPrice, 2) : '--'} / Index {activeMarket ? formatUsd(activeMarket.indexPrice, 2) : '--'}</p>
+                <div className="terminal-tags">
+                  <span className="pill outline">Cross-margin</span>
+                  <span className="pill outline">Low latency</span>
+                  <span className="pill outline">Oracle synced</span>
+                </div>
               </div>
               <div className="terminal-actions">
                 <button className="btn ghost" onClick={() => setFaucetModalOpen(true)}>Faucet</button>
                 <button className="btn secondary" onClick={() => setWithdrawModalOpen(true)}>Withdraw</button>
                 <button className="btn primary" onClick={() => setDepositModalOpen(true)}>Deposit</button>
+              </div>
+            </div>
+
+            <div className="terminal-meta">
+              <div>
+                <p className="label">Spread</p>
+                <strong>{formatUsd(spreadStats.abs, 2)} <span className="muted small">({formatPct(spreadStats.pct)})</span></strong>
+              </div>
+              <div>
+                <p className="label">Open interest</p>
+                <strong>{activeMarket ? formatCompact(activeMarket.openInterest) : '--'}</strong>
+              </div>
+              <div>
+                <p className="label">Funding (1h)</p>
+                <strong>{activeMarket ? formatPct(activeMarket.fundingRate * 100) : '--'}</strong>
+              </div>
+              <div>
+                <p className="label">24h Volume</p>
+                <strong>{activeMarket ? formatCompact(activeMarket.volume24h) : '--'}</strong>
               </div>
             </div>
 
