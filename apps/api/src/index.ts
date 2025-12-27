@@ -1,10 +1,10 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
-import { createPublicClient, createWalletClient, formatUnits, hexToString, http, isAddress, parseUnits, privateKeyToAccount, stringToHex } from 'viem';
+import { createPublicClient, createWalletClient, formatUnits, hexToString, http, parseUnits, privateKeyToAccount, stringToHex } from 'viem';
 import { sepolia } from 'viem/chains';
 import { ENGINE_ABI, ORDERBOOK_ABI, ORACLE_ABI } from './abi';
-import { env } from './config';
+import { env, loadSecrets } from './config';
 import { appendTrade, bumpMarket, getOrders, seedMarkets, state, updateOrderStatus, updateOrderbook, updatePrices, upsertOrder } from './store';
 import { Market, Order, Orderbook, Position, PriceFeed, Trade, WsMessage } from '@dbs/shared';
 import { initDb, getPool, closeDb } from './db/index.js';
@@ -18,6 +18,7 @@ import { startStopTriggerKeeper } from './keepers/stopTriggerKeeper.js';
 import { startFundingKeeperV2 } from './keepers/fundingKeeperV2.js';
 import { startLiquidationKeeperV2 } from './keepers/liquidationKeeperV2.js';
 import { startOracleRouterKeeper } from './keepers/oracleRouterKeeper.js';
+import { startReservesKeeper, getOnChainReservesSummary, getOnChainAttestations, getProofForAddress } from './reserves/reservesKeeper.js';
 import {
   createValidationMiddleware,
   validateMarketIdParam,
@@ -26,6 +27,9 @@ import {
   validatePaginationQuery,
 } from './middleware/validation.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { createRateLimitMiddleware, defaultRateLimitConfig } from './middleware/rateLimit.js';
+import { addWsClient, removeWsClient, broadcast } from './ws.js';
+import { getV2Orderbook, getV2Orders, getV2Positions, getV2Trades } from './v2Data.js';
 
 type PositionState = {
   marketId: string;
@@ -33,12 +37,6 @@ type PositionState = {
   entryPrice: bigint;
   margin: bigint;
 };
-
-type WsClient = {
-  send: (data: string) => void;
-};
-
-const clients = new Set<WsClient>();
 const positionsByAddress = new Map<string, Map<string, PositionState>>();
 
 seedMarkets(env.marketId);
@@ -71,11 +69,6 @@ app.addHook('onSend', async (_request, reply, payload) => {
 
 // Global rate limiting (applied to all routes)
 app.addHook('onRequest', createRateLimitMiddleware(defaultRateLimitConfig));
-
-function broadcast(message: WsMessage) {
-  const payload = JSON.stringify(message);
-  clients.forEach((client) => client.send(payload));
-}
 
 function getMarket(marketId: string) {
   return state.markets.find((market) => market.id === marketId);
@@ -240,7 +233,6 @@ app.get(
 
 // V2 API Endpoints
 app.get('/v2/markets', async () => {
-  const pool = getPool();
   try {
     // Get markets from database or contract state
     // For now, return basic structure
@@ -263,38 +255,12 @@ app.get(
   async (request) => {
     const { marketId } = request.params as { marketId: string };
     const pool = getPool();
-  try {
-    // Get V2 orderbook from database
-    const result = await pool.query(
-      `SELECT order_id, side, size, filled, price, status, auction_state
-       FROM v2_orders
-       WHERE market_id = $1 AND status IN ('live', 'queued_for_auction')
-       ORDER BY price DESC, created_at ASC`,
-      [marketId]
-    );
-
-    // Build orderbook structure
-    const bids: any[] = [];
-    const asks: any[] = [];
-
-    for (const row of result.rows) {
-      const level = {
-        price: Number(row.price),
-        size: Number(row.size) - Number(row.filled || 0),
-        total: Number(row.size),
-      };
-      if (row.side === 'buy') {
-        bids.push(level);
-      } else {
-        asks.push(level);
-      }
+    try {
+      return await getV2Orderbook(pool, marketId);
+    } catch (err) {
+      console.error('V2 Orderbook query failed:', err);
+      return { bids: [], asks: [], auctionState: null };
     }
-
-    return { bids, asks, auctionState: null }; // Would need to read auction state
-  } catch (err) {
-    console.error('V2 Orderbook query failed:', err);
-    return { bids: [], asks: [], auctionState: null };
-  }
 });
 
 app.get(
@@ -305,30 +271,12 @@ app.get(
   async (request) => {
     const { marketId } = request.params as { marketId: string };
     const pool = getPool();
-  try {
-    const result = await pool.query(
-      `SELECT order_id, maker_address, taker_address, side, size, price, maker_fee, taker_fee, is_maker, created_at
-       FROM v2_trades
-       WHERE market_id = $1
-       ORDER BY created_at DESC
-       LIMIT 100`,
-      [marketId]
-    );
-
-    return result.rows.map((row: any) => ({
-      id: row.order_id?.toString() || '',
-      time: row.created_at.toISOString(),
-      price: Number(row.price),
-      size: Number(row.size),
-      side: row.side,
-      makerFee: row.maker_fee ? Number(row.maker_fee) : null,
-      takerFee: row.taker_fee ? Number(row.taker_fee) : null,
-      isMaker: row.is_maker,
-    }));
-  } catch (err) {
-    console.error('V2 Trades query failed:', err);
-    return [];
-  }
+    try {
+      return await getV2Trades(pool, marketId);
+    } catch (err) {
+      console.error('V2 Trades query failed:', err);
+      return [];
+    }
 });
 
 app.get(
@@ -339,31 +287,13 @@ app.get(
   async (request) => {
     const { address } = request.params as { address: string };
 
-  const pool = getPool();
-  try {
-    const result = await pool.query(
-      `SELECT market_id, size, entry_price, funding_entry, opened_at
-       FROM v2_positions
-       WHERE address = $1 AND closed_at IS NULL`,
-      [address.toLowerCase()]
-    );
-
-    // Would need to read current price and calculate PnL/funding
-    return result.rows.map((row: any) => ({
-      id: `${row.market_id}-${row.opened_at}`,
-      marketId: row.market_id,
-      side: Number(row.size) >= 0 ? 'long' : 'short',
-      size: Math.abs(Number(row.size)),
-      entryPrice: Number(row.entry_price),
-      fundingEntry: Number(row.funding_entry),
-      pnl: null, // Would need to calculate
-      fundingPayment: null, // Would need to calculate
-      liquidationPrice: null, // Would need to calculate
-    }));
-  } catch (err) {
-    console.error('V2 Positions query failed:', err);
-    return [];
-  }
+    const pool = getPool();
+    try {
+      return await getV2Positions(pool, address);
+    } catch (err) {
+      console.error('V2 Positions query failed:', err);
+      return [];
+    }
 });
 
 app.get(
@@ -374,34 +304,13 @@ app.get(
   async (request) => {
     const { address } = request.params as { address: string };
 
-  const pool = getPool();
-  try {
-    const result = await pool.query(
-      `SELECT order_id, market_id, side, type, mode, size, filled, price, trigger_price, status, auction_state, created_at
-       FROM v2_orders
-       WHERE address = $1 AND status IN ('live', 'queued_for_auction', 'trigger_pending')
-       ORDER BY created_at DESC`,
-      [address.toLowerCase()]
-    );
-
-    return result.rows.map((row: any) => ({
-      id: row.order_id.toString(),
-      marketId: row.market_id,
-      side: row.side,
-      type: row.type,
-      mode: row.mode,
-      size: Number(row.size),
-      filled: Number(row.filled || 0),
-      price: row.price ? Number(row.price) : null,
-      triggerPrice: row.trigger_price ? Number(row.trigger_price) : null,
-      status: row.status,
-      auctionState: row.auction_state,
-      createdAt: row.created_at.toISOString(),
-    }));
-  } catch (err) {
-    console.error('V2 Orders query failed:', err);
-    return [];
-  }
+    const pool = getPool();
+    try {
+      return await getV2Orders(pool, address);
+    } catch (err) {
+      console.error('V2 Orders query failed:', err);
+      return [];
+    }
 });
 
 app.get(
@@ -551,11 +460,78 @@ app.get(
   }
 });
 
+// Proof of Reserves endpoints
+app.get('/reserves/summary', async () => {
+  try {
+    const summary = await getOnChainReservesSummary();
+    if (!summary) {
+      return {
+        reserves: '0',
+        liabilities: '0',
+        ratio: '0',
+        accounts: 0,
+        lastUpdate: null,
+        merkleRoot: '0x' + '0'.repeat(64),
+      };
+    }
+    return {
+      reserves: summary.reserves.toString(),
+      liabilities: summary.liabilities.toString(),
+      ratio: summary.ratio.toString(),
+      accounts: Number(summary.accounts),
+      lastUpdate: summary.lastUpdate.toString(),
+      merkleRoot: summary.merkleRoot,
+    };
+  } catch (err) {
+    console.error('Reserves summary failed:', err);
+    return {
+      reserves: '0',
+      liabilities: '0',
+      ratio: '0',
+      accounts: 0,
+      lastUpdate: null,
+      merkleRoot: '0x' + '0'.repeat(64),
+    };
+  }
+});
+
+app.get('/reserves/attestations', async () => {
+  try {
+    const attestations = await getOnChainAttestations(20);
+    return attestations ?? [];
+  } catch (err) {
+    console.error('Reserves attestations failed:', err);
+    return [];
+  }
+});
+
+app.get(
+  '/reserves/proof/:address',
+  {
+    preHandler: createValidationMiddleware([validateAddressParam]),
+  },
+  async (request, reply) => {
+    const { address } = request.params as { address: string };
+    try {
+      const proof = await getProofForAddress(address as `0x${string}`);
+      if (!proof) {
+        reply.code(404);
+        return { error: 'not_found' };
+      }
+      return proof;
+    } catch (err) {
+      console.error('Reserves proof failed:', err);
+      reply.code(500);
+      return { error: 'internal_error' };
+    }
+  }
+);
+
 app.get('/ws', { websocket: true }, (connection) => {
   const client = {
     send: (data: string) => connection.socket.send(data),
   };
-  clients.add(client);
+  addWsClient(client);
 
   const snapshot: WsMessage[] = [
     { type: 'markets', data: state.markets },
@@ -564,7 +540,7 @@ app.get('/ws', { websocket: true }, (connection) => {
   snapshot.forEach((msg) => client.send(JSON.stringify(msg)));
 
   connection.socket.on('close', () => {
-    clients.delete(client);
+    removeWsClient(client);
   });
 });
 
@@ -859,6 +835,9 @@ startLiquidationKeeperV2().catch((err) => {
 });
 startOracleRouterKeeper().catch((err) => {
   console.error('Oracle Router Keeper error:', err);
+});
+startReservesKeeper().catch((err) => {
+  console.error('Reserves Keeper error:', err);
 });
 
 // Graceful shutdown

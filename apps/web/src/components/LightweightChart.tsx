@@ -158,19 +158,25 @@ export default function LightweightChart({ symbol, price, orders, positions }: P
 
     // Add Order Lines
     orders.forEach(order => {
-      // Filter orders? Assuming passed orders are relevant.
+      const price = order.triggerPrice ?? 0;
+      if (!price) return;
+
+      const label =
+        order.type === 'limit'
+          ? 'LMT'
+          : order.type === 'stop'
+          ? 'STP'
+          : 'MKT';
+
       const line = seriesRef.current.createPriceLine({
-        price: Number(order.triggerPrice || order.price),
-        color: order.size > 0 ? '#10b981' : '#ef4444',
+        price: Number(price),
+        color: order.side === 'buy' ? '#10b981' : '#ef4444',
         lineWidth: 1,
         lineStyle: 2, // Dashed
         axisLabelVisible: true,
-        title: `${order.orderType === 1 ? 'LMT' : 'STP'} #${order.orderId.toString().slice(-4)}`,
+        title: `${label} #${order.id.slice(-4)}`,
       });
       priceLinesRef.current.push(line);
-
-      // Visualize Trigger Orders attached to positions (TP/SL) if we had them in a unified list
-      // Currently TP/SL are separate orders in the system, so they should appear here if 'orders' contains them.
     });
 
   }, [orders, positions, symbol]);

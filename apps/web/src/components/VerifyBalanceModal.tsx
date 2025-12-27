@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAccount } from 'wagmi';
 import { keccak256, encodePacked, type Address } from 'viem';
+import { API_URL } from '../lib/api';
 
 interface VerifyBalanceModalProps {
     isOpen: boolean;
@@ -33,31 +34,19 @@ export default function VerifyBalanceModal({ isOpen, onClose, merkleRoot }: Veri
         setVerified(null);
 
         try {
-            // In production, fetch from API
-            // const response = await fetch(`/api/reserves/proof/${address}`);
-            // const data = await response.json();
-
-            // Mock proof data for demo
-            const mockProof: ProofResponse = {
-                address: address,
-                balance: '1000000000000000000000', // 1000 in 1e18
-                proof: [
-                    '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-                    '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678',
-                    '0x567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12',
-                ],
-                leafIndex: 42,
-                leaf: '0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
-            };
-
-            setProofData(mockProof);
+            const response = await fetch(`${API_URL}/reserves/proof/${address}`);
+            if (!response.ok) {
+                throw new Error('Proof not found');
+            }
+            const proof = await response.json();
+            setProofData(proof);
 
             // Verify the proof
             const isValid = verifyMerkleProof(
                 merkleRoot,
-                mockProof.address as Address,
-                BigInt(mockProof.balance),
-                mockProof.proof
+                proof.address as Address,
+                BigInt(proof.balance),
+                proof.proof
             );
 
             setVerified(isValid);

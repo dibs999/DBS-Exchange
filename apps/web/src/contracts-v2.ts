@@ -137,6 +137,7 @@ export const ORDERBOOK_V2_ABI = [
       { name: 'mode', type: 'uint8' }, // 0 = Continuous, 1 = Batch
       { name: 'orderType', type: 'uint8' }, // 0 = Market, 1 = Limit, 2 = Stop
       { name: 'triggerPrice', type: 'uint256' },
+      { name: 'maxSlippageBps', type: 'uint256' },
     ],
     outputs: [{ name: 'orderId', type: 'uint256' }],
   },
@@ -220,4 +221,3 @@ export const VAULT_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
-

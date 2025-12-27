@@ -11,7 +11,7 @@ type HistoricalTrade = {
   entryPrice: number;
   exitPrice: number;
   pnl: number;
-  fee: number;
+  fee?: number;
   closedAt: string;
 };
 
@@ -84,12 +84,35 @@ export default function TradeHistory({ address: addressProp }: TradeHistoryProps
       try {
         // Try to fetch from API, fall back to mock data
         const res = await fetch(`${API_URL}/history/${address}`);
-        if (res.ok) {
-          const data = await res.json();
-          setTrades(data);
-        } else {
+        if (!res.ok) {
           setTrades(mockHistoricalTrades);
+          return;
         }
+
+        const data = await res.json();
+
+        if (Array.isArray(data)) {
+          setTrades(data);
+          return;
+        }
+
+        if (Array.isArray(data?.positions)) {
+          const normalized = data.positions.map((position: any) => ({
+            id: position.id ?? `${position.marketId}-${position.closedAt ?? Date.now()}`,
+            marketId: position.marketId,
+            side: position.side === 'buy' ? 'long' : position.side === 'sell' ? 'short' : position.side,
+            size: Number(position.size ?? 0),
+            entryPrice: Number(position.entryPrice ?? 0),
+            exitPrice: Number(position.exitPrice ?? 0),
+            pnl: Number(position.pnl ?? 0),
+            fee: Number(position.fee ?? 0),
+            closedAt: position.closedAt ?? new Date().toISOString(),
+          }));
+          setTrades(normalized);
+          return;
+        }
+
+        setTrades(mockHistoricalTrades);
       } catch {
         // Use mock data when API is unavailable
         setTrades(mockHistoricalTrades);
@@ -103,7 +126,7 @@ export default function TradeHistory({ address: addressProp }: TradeHistoryProps
 
   // Calculate summary stats
   const totalPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
-  const totalFees = trades.reduce((sum, t) => sum + t.fee, 0);
+  const totalFees = trades.reduce((sum, t) => sum + (t.fee ?? 0), 0);
   const winRate = trades.length > 0 
     ? (trades.filter(t => t.pnl > 0).length / trades.length) * 100 
     : 0;
@@ -205,4 +228,3 @@ export default function TradeHistory({ address: addressProp }: TradeHistoryProps
     </div>
   );
 }
-

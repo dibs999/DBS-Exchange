@@ -2,6 +2,8 @@ import { createPublicClient, formatUnits, hexToString, http, parseAbiItem } from
 import { base, sepolia } from 'viem/chains';
 import { getPool } from './db/index.js';
 import { env } from './config.js';
+import { broadcast } from './ws.js';
+import { getV2Orderbook, getV2Orders, getV2Positions, getV2Trades } from './v2Data.js';
 
 // V2 Event ABIs
 const ORDERBOOK_V2_ABI = [
@@ -24,10 +26,6 @@ const PERP_ENGINE_V2_ABI = [
 const VAULT_ABI = [
   parseAbiItem('event VaultDeposit(address indexed account, uint256 assets, uint256 shares)'),
   parseAbiItem('event VaultWithdraw(address indexed account, uint256 assets, uint256 shares)'),
-];
-
-const ORACLE_ROUTER_ABI = [
-  parseAbiItem('event PriceUpdated(bytes32 indexed marketId, uint256 price, uint256 timestamp)'),
 ];
 
 export async function startIndexerV2() {
@@ -86,6 +84,8 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexOrderPlaced(pool, log);
+          await broadcastV2Orderbook(pool, log.args.marketId as `0x${string}`);
+          await broadcastV2Orders(pool, log.args.owner as string);
         }
       },
     });
@@ -97,6 +97,9 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexOrderMatched(pool, log);
+          await broadcastV2Orderbook(pool, log.args.marketId as `0x${string}`);
+          await broadcastV2Trades(pool, log.args.marketId as `0x${string}`);
+          await broadcastV2OrdersByOrderId(pool, log.args.orderId.toString());
         }
       },
     });
@@ -108,6 +111,8 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexOrderCancelledV2(pool, log);
+          await broadcastV2Orderbook(pool, null, log.args.orderId.toString());
+          await broadcastV2OrdersByOrderId(pool, log.args.orderId.toString());
         }
       },
     });
@@ -119,6 +124,8 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexAuctionExecuted(pool, log);
+          await broadcastV2Orderbook(pool, log.args.marketId as `0x${string}`);
+          await broadcastV2Trades(pool, log.args.marketId as `0x${string}`);
         }
       },
     });
@@ -132,6 +139,7 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexPositionOpenedV2(pool, log);
+          await broadcastV2Positions(pool, log.args.account as string);
         }
       },
     });
@@ -143,6 +151,7 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexPositionUpdatedV2(pool, log);
+          await broadcastV2Positions(pool, log.args.account as string);
         }
       },
     });
@@ -154,6 +163,7 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexPositionClosedV2(pool, log);
+          await broadcastV2Positions(pool, log.args.account as string);
         }
       },
     });
@@ -165,6 +175,7 @@ export async function startIndexerV2() {
       onLogs: async (logs) => {
         for (const log of logs) {
           await indexLiquidationExecutedV2(pool, log);
+          await broadcastV2Positions(pool, log.args.account as string);
         }
       },
     });
@@ -539,3 +550,55 @@ async function indexVaultWithdraw(pool: any, log: any) {
   }
 }
 
+function parseMarketId(marketIdHex: `0x${string}`): string {
+  return hexToString(marketIdHex, { size: 32 }).replace(/\0/g, '');
+}
+
+async function getOrderMeta(pool: any, orderId: string): Promise<{ marketId: string | null; address: string | null }> {
+  try {
+    const result = await pool.query(
+      `SELECT market_id, address FROM v2_orders WHERE order_id = $1 LIMIT 1`,
+      [orderId]
+    );
+    if (result.rows.length === 0) return { marketId: null, address: null };
+    return { marketId: result.rows[0].market_id, address: result.rows[0].address };
+  } catch {
+    return { marketId: null, address: null };
+  }
+}
+
+async function broadcastV2Orderbook(pool: any, marketIdHex?: `0x${string}` | null, orderId?: string) {
+  let marketId: string | null = null;
+  if (marketIdHex) {
+    marketId = parseMarketId(marketIdHex);
+  } else if (orderId) {
+    const meta = await getOrderMeta(pool, orderId);
+    marketId = meta.marketId;
+  }
+
+  if (!marketId) return;
+  const snapshot = await getV2Orderbook(pool, marketId);
+  broadcast({ type: 'v2:orderbook', marketId, data: snapshot });
+}
+
+async function broadcastV2Trades(pool: any, marketIdHex: `0x${string}`) {
+  const marketId = parseMarketId(marketIdHex);
+  const trades = await getV2Trades(pool, marketId);
+  broadcast({ type: 'v2:trades', marketId, data: trades });
+}
+
+async function broadcastV2Orders(pool: any, address: string) {
+  const orders = await getV2Orders(pool, address);
+  broadcast({ type: 'v2:orders', address, data: orders });
+}
+
+async function broadcastV2OrdersByOrderId(pool: any, orderId: string) {
+  const meta = await getOrderMeta(pool, orderId);
+  if (!meta.address) return;
+  await broadcastV2Orders(pool, meta.address);
+}
+
+async function broadcastV2Positions(pool: any, address: string) {
+  const positions = await getV2Positions(pool, address);
+  broadcast({ type: 'v2:positions', address, data: positions });
+}

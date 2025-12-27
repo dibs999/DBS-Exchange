@@ -71,4 +71,9 @@ export type WsMessage =
   | { type: 'trades'; marketId: string; data: Trade[] }
   | { type: 'positions'; address: string; data: Position[] }
   | { type: 'orders'; address: string; data: Order[] }
-  | { type: 'prices'; data: PriceFeed };
+  | { type: 'prices'; data: PriceFeed }
+  | { type: 'v2:orderbook'; marketId: string; data: Orderbook & { auctionState?: unknown } }
+  | { type: 'v2:trades'; marketId: string; data: Trade[] }
+  | { type: 'v2:positions'; address: string; data: Position[] }
+  | { type: 'v2:orders'; address: string; data: Order[] }
+  | { type: 'v2:auction'; marketId: string; data: unknown };

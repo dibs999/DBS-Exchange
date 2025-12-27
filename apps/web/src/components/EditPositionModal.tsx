@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi';
 import { parseUnits, stringToHex } from 'viem';
 import { Position } from '@dbs/shared';
-import { formatUsd } from '../lib/format';
+import { formatNumber, formatUsd } from '../lib/format';
 import { ORDERBOOK_V2_ADDRESS, ORDERBOOK_V2_ABI } from '../contracts-v2';
 import { useToast } from './Toast';
 import { FocusTrap } from './Accessibility';
@@ -68,8 +68,8 @@ export default function EditPositionModal({ isOpen, onClose, position }: EditPos
             // placeOrder(marketId, size, price, ...)
             // size > 0 = Buy/Long, size < 0 = Sell/Short.
 
-            const closeSize = isLong ? -position.size : position.size;
-            const closeSizeWei = parseUnits(closeSize.toString(), 18);
+            const sizeUnits = parseUnits(position.size.toString(), 18);
+            const closeSizeWei = isLong ? -sizeUnits : sizeUnits;
 
             const txs = [];
 
@@ -87,6 +87,7 @@ export default function EditPositionModal({ isOpen, onClose, position }: EditPos
                         0, // Mode: Continuous
                         1, // Type: Limit
                         0n, // Trigger Price (0 for Limit)
+                        0, // maxSlippageBps (0 = no limit)
                     ],
                     account: address,
                 });
@@ -109,6 +110,7 @@ export default function EditPositionModal({ isOpen, onClose, position }: EditPos
                         0, // Mode
                         2, // Type: Stop
                         triggerWei, // Trigger Price
+                        0, // maxSlippageBps (0 = no limit)
                     ],
                     account: address,
                 });

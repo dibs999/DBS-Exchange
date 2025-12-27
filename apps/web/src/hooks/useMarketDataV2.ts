@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useAccount } from 'wagmi';
 import { Market, Order, Orderbook, Position, PriceFeed, Trade, WsMessage } from '@dbs/shared';
 import { API_URL, getWsUrl, secureFetch } from '../lib/api';
 
@@ -32,7 +31,6 @@ const fallbackPrices: PriceFeed = {
 };
 
 export function useMarketDataV2(activeMarketId: string, address?: string) {
-  const { address: accountAddress } = useAccount();
   const [markets, setMarkets] = useState<Market[]>(fallbackMarkets);
   const [orderbook, setOrderbook] = useState<Orderbook>(fallbackOrderbook);
   const [trades, setTrades] = useState<Trade[]>(fallbackTrades);
@@ -167,4 +165,3 @@ export function useMarketDataV2(activeMarketId: string, address?: string) {
     auctionState,
   };
 }
-

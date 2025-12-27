@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, http, privateKeyToAccount, Addr
 import { base, sepolia } from 'viem/chains';
 import { env } from '../config.js';
 import { getPool } from '../db/index.js';
-import { buildMerkleTree, type BalanceLeaf, type MerkleTreeResult } from './merkleTree.js';
+import { buildMerkleTree, type BalanceLeaf, type MerkleTreeResult, type MerkleProof } from './merkleTree.js';
 
 // In-memory cache for the current Merkle tree
 let currentTree: MerkleTreeResult | null = null;
@@ -253,6 +253,78 @@ export async function getOnChainReservesSummary(): Promise<{
         };
     } catch (err) {
         console.error('Reserves: Failed to get on-chain summary:', err);
+        return null;
+    }
+}
+
+/**
+ * Get Merkle proof for an address (builds tree if needed)
+ */
+export async function getProofForAddress(address: Address): Promise<MerkleProof | null> {
+    if (!currentTree) {
+        await rebuildMerkleTree();
+    }
+
+    if (!currentTree) return null;
+    return currentTree.proofs.get(address.toLowerCase()) || null;
+}
+
+/**
+ * Get recent attestations from ProofOfReserves contract
+ */
+export async function getOnChainAttestations(limit = 20): Promise<Array<{
+    merkleRoot: string;
+    totalLiabilities: string;
+    totalReserves: string;
+    accountCount: number;
+    timestamp: string;
+    blockNumber: number;
+}> | null> {
+    if (!env.proofOfReservesAddress) {
+        return null;
+    }
+
+    const chain = env.chainId === 8453 ? base : sepolia;
+    const publicClient = createPublicClient({
+        chain,
+        transport: http(env.baseRpcUrl || env.rpcUrl),
+    });
+
+    try {
+        const count = await publicClient.readContract({
+            address: env.proofOfReservesAddress as Address,
+            abi: PROOF_OF_RESERVES_ABI,
+            functionName: 'getAttestationCount',
+        });
+
+        const total = Number(count);
+        if (total === 0) return [];
+
+        const start = Math.max(0, total - limit);
+        const items = [];
+
+        for (let i = start; i < total; i += 1) {
+            const result = await publicClient.readContract({
+                address: env.proofOfReservesAddress as Address,
+                abi: PROOF_OF_RESERVES_ABI,
+                functionName: 'getAttestation',
+                args: [BigInt(i)],
+            });
+
+            const att = result.attestation;
+            items.push({
+                merkleRoot: att.merkleRoot,
+                totalLiabilities: att.totalLiabilities.toString(),
+                totalReserves: att.totalReserves.toString(),
+                accountCount: Number(att.accountCount),
+                timestamp: new Date(Number(att.timestamp) * 1000).toISOString(),
+                blockNumber: Number(att.blockNumber),
+            });
+        }
+
+        return items.reverse();
+    } catch (err) {
+        console.error('Reserves: Failed to get attestations:', err);
         return null;
     }
 }

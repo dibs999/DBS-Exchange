@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useAccount, usePublicClient } from 'wagmi';
-import { formatUnits } from 'viem';
+import { useAccount } from 'wagmi';
 import VerifyBalanceModal from '../components/VerifyBalanceModal';
+import { API_URL } from '../lib/api';
 
 interface ReservesSummary {
-    reserves: string;
-    liabilities: string;
+    reserves: number;
+    liabilities: number;
     ratio: number;
     accounts: number;
     lastUpdate: string;
@@ -22,8 +22,7 @@ interface Attestation {
 }
 
 export default function ReservesPage() {
-    const { address, isConnected } = useAccount();
-    const publicClient = usePublicClient();
+    const { isConnected } = useAccount();
 
     const [summary, setSummary] = useState<ReservesSummary | null>(null);
     const [attestations, setAttestations] = useState<Attestation[]>([]);
@@ -38,38 +37,34 @@ export default function ReservesPage() {
 
     async function fetchReserves() {
         try {
-            // In production, this would call the API
-            // For now, use mock data
-            const mockSummary: ReservesSummary = {
-                reserves: '1234567.89',
-                liabilities: '1189234.56',
-                ratio: 103.81,
-                accounts: 1247,
-                lastUpdate: new Date().toISOString(),
-                merkleRoot: '0x8a3f...b2c1',
-            };
+            const [summaryRes, attRes] = await Promise.all([
+                fetch(`${API_URL}/reserves/summary`),
+                fetch(`${API_URL}/reserves/attestations`),
+            ]);
 
-            const mockAttestations: Attestation[] = [
-                {
-                    merkleRoot: '0x8a3f1e2d...b2c1',
-                    totalLiabilities: '1189234560000',
-                    totalReserves: '1234567890000',
-                    accountCount: 1247,
-                    timestamp: new Date(Date.now() - 3600000).toISOString(),
-                    blockNumber: 12345678,
-                },
-                {
-                    merkleRoot: '0x7b2e1f3c...a1d2',
-                    totalLiabilities: '1156789120000',
-                    totalReserves: '1198234560000',
-                    accountCount: 1231,
-                    timestamp: new Date(Date.now() - 7200000).toISOString(),
-                    blockNumber: 12345432,
-                },
-            ];
+            if (summaryRes.ok) {
+                const summaryData = await summaryRes.json();
+                const reserves = Number(summaryData.reserves || 0) / 1e6;
+                const liabilities = Number(summaryData.liabilities || 0) / 1e18;
+                const ratio = Number(summaryData.ratio || 0) / 100;
+                const lastUpdate = summaryData.lastUpdate
+                    ? new Date(Number(summaryData.lastUpdate) * 1000).toISOString()
+                    : new Date().toISOString();
 
-            setSummary(mockSummary);
-            setAttestations(mockAttestations);
+                setSummary({
+                    reserves,
+                    liabilities,
+                    ratio,
+                    accounts: Number(summaryData.accounts || 0),
+                    lastUpdate,
+                    merkleRoot: summaryData.merkleRoot || '0x' + '0'.repeat(64),
+                });
+            }
+
+            if (attRes.ok) {
+                const attData = await attRes.json();
+                setAttestations(attData || []);
+            }
         } catch (err) {
             console.error('Failed to fetch reserves:', err);
         } finally {

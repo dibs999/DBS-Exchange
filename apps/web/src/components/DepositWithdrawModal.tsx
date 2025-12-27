@@ -1,13 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
+import { useAccount, useChainId, usePublicClient, useWalletClient } from 'wagmi';
 import { formatUnits, parseUnits } from 'viem';
 import { COLLATERAL_ABI, COLLATERAL_ADDRESS, ENGINE_ABI, ENGINE_ADDRESS, ENGINE_READY } from '../contracts';
+import {
+  CHAIN_ID_V2,
+  COLLATERAL_V2_ADDRESS,
+  ENGINE_V2_ADDRESS,
+  ENGINE_V2_READY,
+  PERP_ENGINE_V2_ABI,
+  USDC_ABI,
+} from '../contracts-v2';
 import { formatNumber } from '../lib/format';
 import { useToast } from './Toast';
 import ConfirmDialog from './ConfirmDialog';
 import { useSettings } from '../lib/settings';
 import { FocusTrap } from './Accessibility';
-import { useI18n } from '../lib/i18n';
 
 type DepositWithdrawModalProps = {
   mode: 'deposit' | 'withdraw';
@@ -17,16 +24,26 @@ type DepositWithdrawModalProps = {
 
 export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositWithdrawModalProps) {
   const { address } = useAccount();
+  const chainId = useChainId();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { addToast } = useToast();
   const { settings } = useSettings();
+
+  const useV2 = ENGINE_V2_READY && chainId === CHAIN_ID_V2;
+  const engineReady = useV2 ? ENGINE_V2_READY : ENGINE_READY;
+  const engineAddress = useV2 ? ENGINE_V2_ADDRESS : ENGINE_ADDRESS;
+  const engineAbi = useV2 ? PERP_ENGINE_V2_ABI : ENGINE_ABI;
+  const collateralAddress = useV2 ? COLLATERAL_V2_ADDRESS : COLLATERAL_ADDRESS;
+  const collateralAbi = useV2 ? USDC_ABI : COLLATERAL_ABI;
+  const decimals = useV2 ? 6 : 18;
 
   const [amount, setAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState<number>(0);
   const [allowance, setAllowance] = useState<bigint>(0n);
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const tokenLabel = useV2 ? 'USDC' : 'oUSD';
 
   // Handle ESC key
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -42,34 +59,34 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
 
   useEffect(() => {
     async function loadData() {
-      if (!publicClient || !address || !ENGINE_READY) return;
+      if (!publicClient || !address || !engineReady) return;
 
       try {
         if (mode === 'deposit') {
           const [balance, currentAllowance] = await Promise.all([
             publicClient.readContract({
-              address: COLLATERAL_ADDRESS,
-              abi: COLLATERAL_ABI,
+              address: collateralAddress,
+              abi: collateralAbi,
               functionName: 'balanceOf',
               args: [address],
             }),
             publicClient.readContract({
-              address: COLLATERAL_ADDRESS,
-              abi: COLLATERAL_ABI,
+              address: collateralAddress,
+              abi: collateralAbi,
               functionName: 'allowance',
-              args: [address, ENGINE_ADDRESS],
+              args: [address, engineAddress],
             }),
           ]);
-          setMaxAmount(Number(formatUnits(balance as bigint, 18)));
+          setMaxAmount(Number(formatUnits(balance as bigint, decimals)));
           setAllowance(currentAllowance as bigint);
         } else {
           const balance = await publicClient.readContract({
-            address: ENGINE_ADDRESS,
-            abi: ENGINE_ABI,
+            address: engineAddress,
+            abi: engineAbi,
             functionName: 'collateralBalance',
             args: [address],
           });
-          setMaxAmount(Number(formatUnits(balance as bigint, 18)));
+          setMaxAmount(Number(formatUnits(balance as bigint, useV2 ? 18 : decimals)));
         }
       } catch (err) {
         console.error('Failed to load modal data:', err);
@@ -84,7 +101,7 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
 
   if (!isOpen) return null;
 
-  const amountBigInt = amount ? parseUnits(amount, 18) : 0n;
+  const amountBigInt = amount ? parseUnits(amount, decimals) : 0n;
   const needsApproval = mode === 'deposit' && amountBigInt > allowance;
 
   async function handleApprove() {
@@ -93,10 +110,10 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
     setLoading(true);
     try {
       const { request } = await publicClient.simulateContract({
-        address: COLLATERAL_ADDRESS,
-        abi: COLLATERAL_ABI,
+        address: collateralAddress,
+        abi: collateralAbi,
         functionName: 'approve',
-        args: [ENGINE_ADDRESS, amountBigInt],
+        args: [engineAddress, amountBigInt],
         account: address,
       });
 
@@ -138,8 +155,8 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
     try {
       const functionName = mode === 'deposit' ? 'deposit' : 'withdraw';
       const { request } = await publicClient.simulateContract({
-        address: ENGINE_ADDRESS,
-        abi: ENGINE_ABI,
+        address: engineAddress,
+        abi: engineAbi,
         functionName,
         args: [amountBigInt],
         account: address,
@@ -157,7 +174,7 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
       addToast({
         type: 'success',
         title: `${mode === 'deposit' ? 'Deposit' : 'Withdrawal'} confirmed`,
-        message: `${amount} oUSD ${mode === 'deposit' ? 'deposited' : 'withdrawn'} successfully.`,
+        message: `${amount} ${tokenLabel} ${mode === 'deposit' ? 'deposited' : 'withdrawn'} successfully.`,
       });
       onClose();
     } catch (err: any) {
@@ -171,14 +188,12 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
     }
   }
 
-  const { t } = useI18n();
-
   return (
     <FocusTrap isActive={isOpen}>
       <div className="modal-overlay" onClick={onClose}>
         <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby={`${mode}-modal-title`}>
           <div className="modal-header">
-          <h3>{mode === 'deposit' ? 'Deposit oUSD' : 'Withdraw oUSD'}</h3>
+          <h3>{mode === 'deposit' ? `Deposit ${tokenLabel}` : `Withdraw ${tokenLabel}`}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
@@ -198,14 +213,14 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
               </button>
             </div>
             <p className="input-hint">
-              Available: {formatNumber(maxAmount, 2)} oUSD
+              Available: {formatNumber(maxAmount, 2)} {tokenLabel}
             </p>
           </div>
 
           {mode === 'deposit' && (
             <div className="modal-info">
               <p className="muted small">
-                Deposited oUSD is used as collateral for your perpetual positions. 
+                Deposited {tokenLabel} is used as collateral for your perpetual positions. 
                 You can withdraw unused collateral at any time.
               </p>
             </div>
@@ -223,7 +238,7 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
         <div className="modal-footer">
           {needsApproval ? (
             <button className="btn secondary" onClick={handleApprove} disabled={loading || !amount}>
-              {loading ? 'Approving...' : 'Approve oUSD'}
+              {loading ? 'Approving...' : `Approve ${tokenLabel}`}
             </button>
           ) : null}
           <button
@@ -244,8 +259,8 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
         cancelText="Cancel"
         variant={mode === 'withdraw' ? 'danger' : 'warning'}
         details={[
-          { label: 'Amount', value: `${amount || '0'} oUSD` },
-          { label: 'Available', value: `${formatNumber(maxAmount, 2)} oUSD` },
+          { label: 'Amount', value: `${amount || '0'} ${tokenLabel}` },
+          { label: 'Available', value: `${formatNumber(maxAmount, 2)} ${tokenLabel}` },
         ]}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => {
@@ -258,8 +273,8 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
             try {
               const functionName = mode === 'deposit' ? 'deposit' : 'withdraw';
               const { request } = await publicClient.simulateContract({
-                address: ENGINE_ADDRESS,
-                abi: ENGINE_ABI,
+                address: engineAddress,
+                abi: engineAbi,
                 functionName,
                 args: [amountBigInt],
                 account: address,
@@ -277,7 +292,7 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
               addToast({
                 type: 'success',
                 title: `${mode === 'deposit' ? 'Deposit' : 'Withdrawal'} confirmed`,
-                message: `${amount} oUSD ${mode === 'deposit' ? 'deposited' : 'withdrawn'} successfully.`,
+                message: `${amount} ${tokenLabel} ${mode === 'deposit' ? 'deposited' : 'withdrawn'} successfully.`,
               });
               onClose();
             } catch (err: any) {
@@ -297,4 +312,3 @@ export default function DepositWithdrawModal({ mode, isOpen, onClose }: DepositW
     </FocusTrap>
   );
 }
-

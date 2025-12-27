@@ -2,16 +2,20 @@ import React, { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAccount } from 'wagmi';
 import { useMarketData } from '../hooks/useMarketData';
+import { useMarketDataV2 } from '../hooks/useMarketDataV2';
 import { formatUsd, formatPct } from '../lib/format';
 import { MARKET_ID_STRING } from '../contracts';
+import { ENGINE_V2_READY, MARKET_ID_V2_STRING, ORDERBOOK_V2_READY } from '../contracts-v2';
 import { useModal } from '../lib/modalContext';
-import TradingViewChart from '../components/TradingViewChart';
 import LightweightChart from '../components/LightweightChart';
 import DepthChart from '../components/DepthChart';
 import OrderBook from '../components/OrderBook';
+import OrderBookV2 from '../components/OrderBookV2';
 import Trades from '../components/Trades';
 import OrderEntry from '../components/OrderEntry';
+import OrderEntryV2 from '../components/OrderEntryV2';
 import AccountPanel from '../components/AccountPanel';
+import AccountPanelV2 from '../components/AccountPanelV2';
 import { OrderbookSkeleton } from '../components/LoadingSkeleton';
 import WalletButton from '../components/WalletButton';
 
@@ -20,20 +24,27 @@ export default function TradePage() {
   const { openDeposit, openWithdraw, openFaucet } = useModal();
   const [searchParams, setSearchParams] = useSearchParams();
   const marketParam = searchParams.get('market');
-  const [activeMarketId, setActiveMarketId] = useState(marketParam || MARKET_ID_STRING);
+  const legacyParam = searchParams.get('legacy');
+  const useV2 = !legacyParam && ENGINE_V2_READY && ORDERBOOK_V2_READY;
+  const defaultMarket = useV2 ? MARKET_ID_V2_STRING : MARKET_ID_STRING;
+  const [activeMarketId, setActiveMarketId] = useState(marketParam || defaultMarket);
   const [ticketPrefill, setTicketPrefill] = useState<{ price: number; side: 'bid' | 'ask'; key: number } | null>(null);
   const [chartTab, setChartTab] = useState<'price' | 'depth'>('price');
 
+  const v1 = useMarketData(activeMarketId, address);
+  const v2 = useMarketDataV2(activeMarketId, address);
+  const data = useV2 ? v2 : v1;
   const {
     markets,
     activeMarket,
     orderbook,
     trades,
     positions,
+    orders,
     prices,
     isLoadingSnapshot,
     isWsConnected,
-  } = useMarketData(activeMarketId, address);
+  } = data;
 
   const priceHeadline = useMemo(() => {
     const eth = prices.ethereum?.usd ?? activeMarket?.markPrice ?? 0;
@@ -46,7 +57,7 @@ export default function TradePage() {
 
   const handleMarketChange = (marketId: string) => {
     setActiveMarketId(marketId);
-    setSearchParams({ market: marketId });
+    setSearchParams(legacyParam ? { market: marketId, legacy: legacyParam } : { market: marketId });
   };
 
   return (
@@ -129,7 +140,7 @@ export default function TradePage() {
                   <LightweightChart
                     symbol={activeMarket?.symbol ?? 'ETH-USD'}
                     price={activeMarket?.markPrice ?? 0}
-                    orders={[]} // TODO: Fetch user open orders
+                    orders={orders ?? []}
                     positions={positions}
                   />
                 ) : (
@@ -148,12 +159,24 @@ export default function TradePage() {
             {isLoadingSnapshot ? (
               <OrderbookSkeleton />
             ) : (
-              <OrderBook
-                data={orderbook}
-                onPriceClick={(price, side) => {
-                  setTicketPrefill({ price, side, key: Date.now() });
-                }}
-              />
+              <>
+                {useV2 ? (
+                  <OrderBookV2
+                    data={orderbook}
+                    auctionState={useV2 ? v2.auctionState : null}
+                    onPriceClick={(price, side) => {
+                      setTicketPrefill({ price, side, key: Date.now() });
+                    }}
+                  />
+                ) : (
+                  <OrderBook
+                    data={orderbook}
+                    onPriceClick={(price, side) => {
+                      setTicketPrefill({ price, side, key: Date.now() });
+                    }}
+                  />
+                )}
+              </>
             )}
             <Trades data={trades} />
           </div>
@@ -161,19 +184,37 @@ export default function TradePage() {
           {/* Right Column: Order Entry + Account */}
           <div className="terminal-right">
             <div className="order-entry-container">
-              <OrderEntry
-                marketId={activeMarketId}
-                markPrice={activeMarket?.markPrice ?? 0}
-                prefill={ticketPrefill}
-              />
+              {useV2 ? (
+                <OrderEntryV2
+                  marketId={activeMarketId}
+                  markPrice={activeMarket?.markPrice ?? 0}
+                  prefill={ticketPrefill}
+                />
+              ) : (
+                <OrderEntry
+                  marketId={activeMarketId}
+                  markPrice={activeMarket?.markPrice ?? 0}
+                  prefill={ticketPrefill}
+                />
+              )}
             </div>
             {isConnected && address ? (
-              <AccountPanel
-                positions={positions}
-                onDeposit={openDeposit}
-                onWithdraw={openWithdraw}
-                onFaucet={openFaucet}
-              />
+              <>
+                {useV2 ? (
+                  <AccountPanelV2
+                    positions={positions}
+                    onDeposit={openDeposit}
+                    onWithdraw={openWithdraw}
+                  />
+                ) : (
+                  <AccountPanel
+                    positions={positions}
+                    onDeposit={openDeposit}
+                    onWithdraw={openWithdraw}
+                    onFaucet={openFaucet}
+                  />
+                )}
+              </>
             ) : (
               <div className="connect-prompt">
                 <h3>Connect Wallet</h3>
@@ -187,4 +228,3 @@ export default function TradePage() {
     </>
   );
 }
-
