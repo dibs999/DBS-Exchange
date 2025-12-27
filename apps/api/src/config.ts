@@ -37,7 +37,7 @@ async function getSecret(key: string, fallback: string): Promise<string> {
       console.warn(`Failed to fetch secret ${key} from AWS Secrets Manager:`, err);
     }
   }
-  
+
   // Check for HashiCorp Vault
   if (process.env.VAULT_ADDR && process.env.VAULT_TOKEN) {
     try {
@@ -56,7 +56,7 @@ async function getSecret(key: string, fallback: string): Promise<string> {
       console.warn(`Failed to fetch secret ${key} from Vault:`, err);
     }
   }
-  
+
   // Fallback to environment variable
   const envValue = process.env[key];
   if (envValue) {
@@ -66,7 +66,7 @@ async function getSecret(key: string, fallback: string): Promise<string> {
     }
     return envValue;
   }
-  
+
   return fallback;
 }
 
@@ -115,6 +115,12 @@ export const env = {
   stopTriggerKeeperInterval: parseNumber(process.env.STOP_TRIGGER_KEEPER_INTERVAL, 10_000), // 10 seconds
   oracleRouterKeeperEnabled: process.env.ORACLE_ROUTER_KEEPER_ENABLED !== 'false',
   oracleRouterKeeperInterval: parseNumber(process.env.ORACLE_ROUTER_KEEPER_INTERVAL, 30_000), // 30 seconds
+  // Proof of Reserves configuration
+  proofOfReservesAddress: process.env.PROOF_OF_RESERVES_ADDRESS || '',
+  reservesKeeperEnabled: process.env.RESERVES_KEEPER_ENABLED !== 'false',
+  reservesKeeperInterval: parseNumber(process.env.RESERVES_KEEPER_INTERVAL, 3_600_000), // 1 hour
+  // Redis configuration for horizontal scaling
+  redisUrl: process.env.REDIS_URL || '',
 };
 
 // Export async function to load secrets at startup (optional)
@@ -125,7 +131,7 @@ export async function loadSecrets(): Promise<void> {
       console.warn('⚠️  WARNING: KEEPER_PRIVATE_KEY is in environment variable. Consider using a secrets manager in production!');
     }
   }
-  
+
   // Optionally reload from secrets manager
   if (process.env.AWS_SECRETS_MANAGER_REGION || process.env.VAULT_ADDR) {
     try {

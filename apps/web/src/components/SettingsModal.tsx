@@ -99,6 +99,46 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </label>
           </div>
 
+          {/* One-Click Trading */}
+          <div className="settings-section">
+            <h4>⚡ One-Click Trading</h4>
+            <p className="muted small">
+              Execute trades instantly without confirmations. Use with caution!
+            </p>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={localSettings.oneClickMode}
+                onChange={(e) => setLocalSettings({
+                  ...localSettings,
+                  oneClickMode: e.target.checked,
+                  showConfirmations: e.target.checked ? false : localSettings.showConfirmations
+                })}
+              />
+              <span>Enable One-Click Mode</span>
+            </label>
+            {localSettings.oneClickMode && (
+              <div style={{ marginTop: 12 }}>
+                <label>
+                  Default Order Size (ETH)
+                  <input
+                    type="number"
+                    value={localSettings.defaultOrderSize}
+                    onChange={(e) => setLocalSettings({ ...localSettings, defaultOrderSize: e.target.value })}
+                    step="0.01"
+                    min="0.01"
+                    style={{ marginLeft: 8, width: 80 }}
+                  />
+                </label>
+              </div>
+            )}
+            {localSettings.oneClickMode && (
+              <p className="warning-text" style={{ marginTop: 8 }}>
+                ⚠️ One-Click Mode enabled. Orders will execute immediately!
+              </p>
+            )}
+          </div>
+
           {/* Sound */}
           <div className="settings-section">
             <h4>Notifications</h4>
@@ -123,6 +163,26 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               />
               <span>Compact mode (smaller UI elements)</span>
             </label>
+          </div>
+
+          {/* Theme */}
+          <div className="settings-section">
+            <h4>🎨 Theme</h4>
+            <p className="muted small">Choose your preferred appearance</p>
+            <div className="slippage-options" style={{ marginTop: 8 }}>
+              <button
+                className={`slippage-btn ${localSettings.theme === 'dark' ? 'active' : ''}`}
+                onClick={() => setLocalSettings({ ...localSettings, theme: 'dark' })}
+              >
+                🌙 Dark
+              </button>
+              <button
+                className={`slippage-btn ${localSettings.theme === 'light' ? 'active' : ''}`}
+                onClick={() => setLocalSettings({ ...localSettings, theme: 'light' })}
+              >
+                ☀️ Light
+              </button>
+            </div>
           </div>
 
           {/* Language */}

@@ -6,6 +6,8 @@ import { formatUsd, formatPct } from '../lib/format';
 import { MARKET_ID_STRING } from '../contracts';
 import { useModal } from '../lib/modalContext';
 import TradingViewChart from '../components/TradingViewChart';
+import LightweightChart from '../components/LightweightChart';
+import DepthChart from '../components/DepthChart';
 import OrderBook from '../components/OrderBook';
 import Trades from '../components/Trades';
 import OrderEntry from '../components/OrderEntry';
@@ -20,6 +22,7 @@ export default function TradePage() {
   const marketParam = searchParams.get('market');
   const [activeMarketId, setActiveMarketId] = useState(marketParam || MARKET_ID_STRING);
   const [ticketPrefill, setTicketPrefill] = useState<{ price: number; side: 'bid' | 'ask'; key: number } | null>(null);
+  const [chartTab, setChartTab] = useState<'price' | 'depth'>('price');
 
   const {
     markets,
@@ -101,9 +104,42 @@ export default function TradePage() {
       <section className="terminal">
         <div className="terminal-layout">
           {/* Left Column: Chart */}
+          {/* Left Column: Chart */}
           <div className="terminal-left">
-            <div className="chart-container">
-              <TradingViewChart symbol={activeMarket?.tvSymbol ?? 'BINANCE:ETHUSDT'} />
+            <div className="chart-container panel">
+              <div className="chart-tabs panel-header" style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid #333', padding: '10px' }}>
+                <button
+                  className={chartTab === 'price' ? 'active' : 'ghost'}
+                  onClick={() => setChartTab('price')}
+                  style={{ background: 'none', border: 'none', color: chartTab === 'price' ? '#fff' : '#666', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Price Chart
+                </button>
+                <button
+                  className={chartTab === 'depth' ? 'active' : 'ghost'}
+                  onClick={() => setChartTab('depth')}
+                  style={{ background: 'none', border: 'none', color: chartTab === 'depth' ? '#fff' : '#666', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Depth Chart
+                </button>
+              </div>
+
+              <div style={{ flex: 1, position: 'relative', height: '100%', minHeight: 400 }}>
+                {chartTab === 'price' ? (
+                  <LightweightChart
+                    symbol={activeMarket?.symbol ?? 'ETH-USD'}
+                    price={activeMarket?.markPrice ?? 0}
+                    orders={[]} // TODO: Fetch user open orders
+                    positions={positions}
+                  />
+                ) : (
+                  <DepthChart
+                    bids={orderbook?.bids ?? []}
+                    asks={orderbook?.asks ?? []}
+                    currentPrice={activeMarket?.markPrice ?? 0}
+                  />
+                )}
+              </div>
             </div>
           </div>
 

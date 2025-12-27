@@ -7,8 +7,9 @@ import DepositWithdrawModal from './DepositWithdrawModal';
 import FaucetModal from './FaucetModal';
 import SettingsModal from './SettingsModal';
 import OnboardingModal from './OnboardingModal';
+import NotificationCenter, { useNotifications } from './NotificationCenter';
 import { ToastProvider } from './Toast';
-import { SettingsProvider } from '../lib/settings';
+import { SettingsProvider, useSettings } from '../lib/settings';
 import { ModalProvider, useModal } from '../lib/modalContext';
 import { useI18n } from '../lib/i18n';
 
@@ -21,10 +22,19 @@ function LayoutContent({ children }: LayoutProps) {
   const { isConnected } = useAccount();
   const { t } = useI18n();
   const { depositOpen, withdrawOpen, faucetOpen, setDepositOpen, setWithdrawOpen, setFaucetOpen } = useModal();
+  const { settings } = useSettings();
 
   // Other modal states
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const { notifications, markAsRead, markAllAsRead, clearAll, unreadCount } = useNotifications();
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', settings.theme);
+  }, [settings.theme]);
 
   // Check if onboarding should be shown
   useEffect(() => {
@@ -33,6 +43,11 @@ function LayoutContent({ children }: LayoutProps) {
       setOnboardingOpen(true);
     }
   }, [isConnected]);
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -51,6 +66,9 @@ function LayoutContent({ children }: LayoutProps) {
           break;
         case ',':
           setSettingsOpen(true);
+          break;
+        case 'escape':
+          setMobileMenuOpen(false);
           break;
       }
     }
@@ -84,7 +102,14 @@ function LayoutContent({ children }: LayoutProps) {
                 <p className="muted small">Base perps desk</p>
               </div>
             </div>
-            <nav className="nav">
+            <nav className={`nav ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+              <button
+                className="mobile-nav-close"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close menu"
+              >
+                ✕
+              </button>
               <Link to="/" className={isActive('/') ? 'active' : ''} aria-label="Trade">
                 Trade
               </Link>
@@ -100,6 +125,15 @@ function LayoutContent({ children }: LayoutProps) {
               <Link to="/analytics" className={isActive('/analytics') ? 'active' : ''} aria-label="Analytics">
                 Analytics
               </Link>
+              <Link to="/leaderboard" className={isActive('/leaderboard') ? 'active' : ''} aria-label="Leaderboard">
+                🏆 Leaderboard
+              </Link>
+              <Link to="/referral" className={isActive('/referral') ? 'active' : ''} aria-label="Referral">
+                🔗 Referral
+              </Link>
+              <Link to="/reserves" className={isActive('/reserves') ? 'active' : ''} aria-label="Reserves">
+                🛡️ Reserves
+              </Link>
             </nav>
             <div className="nav-actions">
               <span className={`pill status-pill ${isConnected ? 'positive' : 'negative'}`} style={{ display: 'none' }}>
@@ -113,6 +147,33 @@ function LayoutContent({ children }: LayoutProps) {
               >
                 ⚙️
               </button>
+              <button
+                className="btn ghost notification-btn"
+                onClick={() => setNotifOpen(!notifOpen)}
+                title="Notifications"
+                aria-label="Notifications"
+                style={{ position: 'relative' }}
+              >
+                🔔
+                {unreadCount > 0 && (
+                  <span style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    background: '#ef4444',
+                    color: '#fff',
+                    fontSize: 10,
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
               <button className="btn ghost" aria-label="Docs">
                 Docs
               </button>
@@ -125,6 +186,13 @@ function LayoutContent({ children }: LayoutProps) {
                 ?
               </button>
               <WalletButton />
+              <button
+                className="mobile-menu-toggle"
+                onClick={() => setMobileMenuOpen(true)}
+                aria-label="Open menu"
+              >
+                ☰
+              </button>
             </div>
           </header>
 
@@ -156,6 +224,26 @@ function LayoutContent({ children }: LayoutProps) {
             </div>
           </footer>
 
+          {/* Mobile Bottom Navigation */}
+          <nav className="mobile-bottom-nav">
+            <Link to="/" className={isActive('/') ? 'active' : ''}>
+              <span className="nav-icon">📈</span>
+              <span>Trade</span>
+            </Link>
+            <Link to="/markets" className={isActive('/markets') ? 'active' : ''}>
+              <span className="nav-icon">🏪</span>
+              <span>Markets</span>
+            </Link>
+            <Link to="/portfolio" className={isActive('/portfolio') ? 'active' : ''}>
+              <span className="nav-icon">💼</span>
+              <span>Portfolio</span>
+            </Link>
+            <Link to="/vault" className={isActive('/vault') ? 'active' : ''}>
+              <span className="nav-icon">🏦</span>
+              <span>Vault</span>
+            </Link>
+          </nav>
+
           {/* Modals */}
           <DepositWithdrawModal mode="deposit" isOpen={depositOpen} onClose={() => setDepositOpen(false)} />
           <DepositWithdrawModal mode="withdraw" isOpen={withdrawOpen} onClose={() => setWithdrawOpen(false)} />
@@ -165,6 +253,14 @@ function LayoutContent({ children }: LayoutProps) {
             isOpen={onboardingOpen}
             onClose={() => setOnboardingOpen(false)}
             onComplete={() => setOnboardingOpen(false)}
+          />
+          <NotificationCenter
+            isOpen={notifOpen}
+            onClose={() => setNotifOpen(false)}
+            notifications={notifications}
+            onMarkAsRead={markAsRead}
+            onMarkAllAsRead={markAllAsRead}
+            onClearAll={clearAll}
           />
         </div>
       </SettingsProvider>

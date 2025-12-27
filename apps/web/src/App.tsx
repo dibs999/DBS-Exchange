@@ -6,6 +6,9 @@ import MarketsPage from './pages/MarketsPage';
 import PortfolioPage from './pages/PortfolioPage';
 import VaultPage from './pages/VaultPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import ReferralPage from './pages/ReferralPage';
+import ReservesPage from './pages/ReservesPage';
 
 export default function App() {
   return (
@@ -17,8 +20,12 @@ export default function App() {
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/vault" element={<VaultPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/leaderboard" element={<LeaderboardPage />} />
+        <Route path="/referral" element={<ReferralPage />} />
+        <Route path="/reserves" element={<ReservesPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
   );
 }
+

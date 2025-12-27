@@ -8,6 +8,7 @@ import { useToast } from './Toast';
 import ConfirmDialog from './ConfirmDialog';
 import { useSettings } from '../lib/settings';
 import { useLiquidationPrice } from '../hooks/useLiquidationPrice';
+import EditPositionModal from './EditPositionModal';
 
 type PositionsProps = {
   data: Position[];
@@ -19,10 +20,11 @@ export default function Positions({ data }: PositionsProps) {
   const { data: walletClient } = useWalletClient();
   const { addToast } = useToast();
   const { settings } = useSettings();
-  
+
   const [closingId, setClosingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmPos, setConfirmPos] = useState<Position | null>(null);
+  const [editPos, setEditPos] = useState<Position | null>(null);
 
   async function closePositionNow(position: Position) {
     if (!walletClient || !publicClient || !address || !ENGINE_READY) return;
@@ -30,7 +32,7 @@ export default function Positions({ data }: PositionsProps) {
     setClosingId(position.id);
     try {
       const marketIdHex = stringToHex(position.marketId, { size: 32 });
-      
+
       const { request } = await publicClient.simulateContract({
         address: ENGINE_ADDRESS,
         abi: ENGINE_ABI,
@@ -72,6 +74,14 @@ export default function Positions({ data }: PositionsProps) {
     setConfirmPos(position);
   }
 
+  function handleAddMargin() {
+    addToast({
+      type: 'info',
+      title: 'Add Margin',
+      message: 'To add margin, please use the Deposit button in the Account panel.',
+    });
+  }
+
   return (
     <div className="panel positions-panel">
       <div className="panel-header">
@@ -86,7 +96,7 @@ export default function Positions({ data }: PositionsProps) {
               {formatUsd(data.reduce((s, p) => s + p.pnl, 0), 2)}
             </span>
           )}
-        <button className="chip ghost">Live</button>
+          <button className="chip ghost">Live</button>
         </div>
       </div>
 
@@ -106,105 +116,109 @@ export default function Positions({ data }: PositionsProps) {
         data.map((pos) => {
           const liquidation = useLiquidationPrice(pos, pos.markPrice);
           const warningClass = liquidation.warning === 'red' ? 'liquidation-warning-red' :
-                               liquidation.warning === 'orange' ? 'liquidation-warning-orange' :
-                               liquidation.warning === 'yellow' ? 'liquidation-warning-yellow' : '';
-          
-          return (
-          <div key={pos.id} className={`position-item ${warningClass}`}>
-            <div 
-              className="positions-row"
-              onClick={() => setExpandedId(expandedId === pos.id ? null : pos.id)}
-            >
-            <span>{pos.marketId}</span>
-              <span className={pos.side === 'long' ? 'text-positive' : 'text-negative'}>
-                {pos.side.toUpperCase()}
-              </span>
-            <span>{formatNumber(pos.size, 4)}</span>
-            <span>{formatUsd(pos.entryPrice, 2)}</span>
-            <span>{formatUsd(pos.markPrice, 2)}</span>
-            <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
-                {pos.pnl >= 0 ? '+' : ''}{formatUsd(pos.pnl, 2)}
-              </span>
-              <span className="position-actions-cell">
-                {liquidation.warning !== 'none' && (
-                  <span className={`liquidation-badge ${liquidation.warning}`} title={`${liquidation.distance?.toFixed(2)}% from liquidation`}>
-                    ⚠️
-                  </span>
-                )}
-                <button
-                  className="btn-close-position"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleClosePosition(pos);
-                  }}
-                  disabled={closingId === pos.id || !isConnected}
-                  title="Close position"
-                >
-                  {closingId === pos.id ? '...' : '✕'}
-                </button>
-              </span>
-            </div>
+            liquidation.warning === 'orange' ? 'liquidation-warning-orange' :
+              liquidation.warning === 'yellow' ? 'liquidation-warning-yellow' : '';
 
-            {expandedId === pos.id && (
-              <div className="position-details">
-                {liquidation.warning !== 'none' && (
-                  <div className={`liquidation-alert ${liquidation.warning}`}>
-                    <strong>⚠️ Liquidation Warning</strong>
-                    <p className="muted small">
-                      Position is {liquidation.distance?.toFixed(2)}% away from liquidation price.
-                      {liquidation.warning === 'red' && ' Consider closing or adding margin immediately.'}
-                      {liquidation.warning === 'orange' && ' Consider reducing position size or adding margin.'}
-                      {liquidation.warning === 'yellow' && ' Monitor closely.'}
-                    </p>
-                  </div>
-                )}
-                <div className="detail-row">
-                  <span className="label">Leverage</span>
-                  <span>{pos.leverage}x</span>
-                </div>
-                <div className="detail-row">
-                  <span className="label">Margin</span>
-                  <span>{formatUsd(pos.margin, 2)}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="label">Liquidation Price</span>
-                  <span className={`text-negative ${liquidation.warning !== 'none' ? `liquidation-price-${liquidation.warning}` : ''}`}>
-                    {liquidation.price ? formatUsd(liquidation.price, 2) : formatUsd(pos.liquidationPrice, 2)}
-                    {liquidation.distance !== null && (
-                      <span className="muted small"> ({liquidation.distance.toFixed(2)}% away)</span>
-                    )}
-                  </span>
-                </div>
-                <div className="detail-row">
-                  <span className="label">Notional</span>
-                  <span>{formatUsd(pos.size * pos.markPrice, 2)}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="label">ROE</span>
-                  <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
-                    {pos.margin > 0 ? ((pos.pnl / pos.margin) * 100).toFixed(2) : 0}%
-            </span>
-                </div>
-                
-                <div className="position-actions">
-                  <button 
-                    className="btn secondary"
-                    onClick={() => handleClosePosition(pos)}
+          return (
+            <div key={pos.id} className={`position-item ${warningClass}`}>
+              <div
+                className="positions-row"
+                onClick={() => setExpandedId(expandedId === pos.id ? null : pos.id)}
+              >
+                <span>{pos.marketId}</span>
+                <span className={pos.side === 'long' ? 'text-positive' : 'text-negative'}>
+                  {pos.side.toUpperCase()}
+                </span>
+                <span>{formatNumber(pos.size, 4)}</span>
+                <span>{formatUsd(pos.entryPrice, 2)}</span>
+                <span>{formatUsd(pos.markPrice, 2)}</span>
+                <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
+                  {pos.pnl >= 0 ? '+' : ''}{formatUsd(pos.pnl, 2)}
+                </span>
+                <span className="position-actions-cell">
+                  {liquidation.warning !== 'none' && (
+                    <span className={`liquidation-badge ${liquidation.warning}`} title={`${liquidation.distance?.toFixed(2)}% from liquidation`}>
+                      ⚠️
+                    </span>
+                  )}
+                  <button
+                    className="btn-close-position"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleClosePosition(pos);
+                    }}
                     disabled={closingId === pos.id || !isConnected}
+                    title="Close position"
                   >
-                    {closingId === pos.id ? 'Closing...' : 'Close Position'}
+                    {closingId === pos.id ? '...' : '✕'}
                   </button>
-                  <button className="btn ghost" disabled>
-                    Add Margin
-                  </button>
-                  <button className="btn ghost" disabled>
-                    Set TP/SL
-                  </button>
-                </div>
+                </span>
               </div>
-            )}
-          </div>
-        ))
+
+              {expandedId === pos.id && (
+                <div className="position-details">
+                  {liquidation.warning !== 'none' && (
+                    <div className={`liquidation-alert ${liquidation.warning}`}>
+                      <strong>⚠️ Liquidation Warning</strong>
+                      <p className="muted small">
+                        Position is {liquidation.distance?.toFixed(2)}% away from liquidation price.
+                        {liquidation.warning === 'red' && ' Consider closing or adding margin immediately.'}
+                        {liquidation.warning === 'orange' && ' Consider reducing position size or adding margin.'}
+                        {liquidation.warning === 'yellow' && ' Monitor closely.'}
+                      </p>
+                    </div>
+                  )}
+                  <div className="detail-row">
+                    <span className="label">Leverage</span>
+                    <span>{pos.leverage}x</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="label">Margin</span>
+                    <span>{formatUsd(pos.margin, 2)}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="label">Liquidation Price</span>
+                    <span className={`text-negative ${liquidation.warning !== 'none' ? `liquidation-price-${liquidation.warning}` : ''}`}>
+                      {liquidation.price ? formatUsd(liquidation.price, 2) : formatUsd(pos.liquidationPrice, 2)}
+                      {liquidation.distance !== null && (
+                        <span className="muted small"> ({liquidation.distance.toFixed(2)}% away)</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="label">Notional</span>
+                    <span>{formatUsd(pos.size * pos.markPrice, 2)}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="label">ROE</span>
+                    <span className={pos.pnl >= 0 ? 'text-positive' : 'text-negative'}>
+                      {pos.margin > 0 ? ((pos.pnl / pos.margin) * 100).toFixed(2) : 0}%
+                    </span>
+                  </div>
+
+                  <div className="position-actions">
+                    <button
+                      className="btn secondary"
+                      onClick={() => handleClosePosition(pos)}
+                      disabled={closingId === pos.id || !isConnected}
+                    >
+                      {closingId === pos.id ? 'Closing...' : 'Close Position'}
+                    </button>
+                    <button className="btn ghost" onClick={handleAddMargin}>
+                      Add Margin
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setEditPos(pos)}
+                      disabled={!isConnected}
+                    >
+                      Set TP/SL
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
       )}
 
       <ConfirmDialog
@@ -217,13 +231,13 @@ export default function Positions({ data }: PositionsProps) {
         details={
           confirmPos
             ? [
-                { label: 'Market', value: confirmPos.marketId },
-                { label: 'Side', value: confirmPos.side.toUpperCase() },
-                { label: 'Size', value: `${formatNumber(confirmPos.size, 4)} ETH` },
-                { label: 'Entry', value: formatUsd(confirmPos.entryPrice, 2) },
-                { label: 'Mark', value: formatUsd(confirmPos.markPrice, 2) },
-                { label: 'Unrealized P&L', value: formatUsd(confirmPos.pnl, 2) },
-              ]
+              { label: 'Market', value: confirmPos.marketId },
+              { label: 'Side', value: confirmPos.side.toUpperCase() },
+              { label: 'Size', value: `${formatNumber(confirmPos.size, 4)} ETH` },
+              { label: 'Entry', value: formatUsd(confirmPos.entryPrice, 2) },
+              { label: 'Mark', value: formatUsd(confirmPos.markPrice, 2) },
+              { label: 'Unrealized P&L', value: formatUsd(confirmPos.pnl, 2) },
+            ]
             : undefined
         }
         onCancel={() => setConfirmPos(null)}
@@ -234,6 +248,14 @@ export default function Positions({ data }: PositionsProps) {
           closePositionNow(pos);
         }}
       />
+
+      {editPos && (
+        <EditPositionModal
+          isOpen={Boolean(editPos)}
+          onClose={() => setEditPos(null)}
+          position={editPos}
+        />
+      )}
     </div>
   );
 }

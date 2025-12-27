@@ -5,6 +5,9 @@ export type Settings = {
   showConfirmations: boolean;
   soundEnabled: boolean;
   compactMode: boolean;
+  oneClickMode: boolean; // Skip confirmations AND submit immediately on side selection
+  defaultOrderSize: string; // Default size for quick trading
+  theme: 'dark' | 'light'; // UI theme
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -12,6 +15,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showConfirmations: true,
   soundEnabled: false,
   compactMode: false,
+  oneClickMode: false,
+  defaultOrderSize: '0.1',
+  theme: 'dark',
 };
 
 const STORAGE_KEY = 'obsidian-settings';
